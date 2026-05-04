@@ -9,6 +9,8 @@
 
 #import "AlarmIntentParser.h"
 #import "CallViewController.h"
+#import "IFlytekAIKitWakeWordDetector.h"
+#import "LocalWakeWordService.h"
 #import "SpeechRecognitionService.h"
 #import "SpeechSynthesisService.h"
 
@@ -18,17 +20,18 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     ChatMessageRoleSystem
 };
 
-@interface ViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, SpeechRecognitionServiceDelegate, CallViewControllerDelegate>
+@interface ViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, LocalWakeWordServiceDelegate, CallViewControllerDelegate>
 
 @property (nonatomic, strong) AlarmIntentParser *intentParser;
-@property (nonatomic, strong) SpeechRecognitionService *wakeSpeechService;
+@property (nonatomic, strong) LocalWakeWordService *wakeWordService;
 @property (nonatomic, strong) SpeechSynthesisService *speechSynthesisService;
 @property (nonatomic, strong) NSMutableArray<NSDictionary<NSString *, id> *> *messages;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UITextField *textField;
 @property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) NSLayoutConstraint *inputBarBottomConstraint;
 @property (nonatomic, assign) BOOL isCallPresented;
-@property (nonatomic, assign) BOOL speechAuthorized;
+@property (nonatomic, assign) BOOL wakeAuthorized;
 
 @end
 
@@ -37,27 +40,41 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.intentParser = [[AlarmIntentParser alloc] init];
-    self.wakeSpeechService = [[SpeechRecognitionService alloc] init];
+    id<LocalWakeWordDetecting> wakeDetector = [IFlytekAIKitWakeWordDetector detectorIfReady];
+    NSString *wakeStatusMessage = nil;
+    if (wakeDetector) {
+        wakeStatusMessage = ((IFlytekAIKitWakeWordDetector *)wakeDetector).statusMessage;
+    } else {
+        wakeDetector = [[DevelopmentWakeWordDetector alloc] init];
+        wakeStatusMessage = [IFlytekAIKitWakeWordDetector integrationStatusMessage];
+    }
+    self.wakeWordService = [[LocalWakeWordService alloc] initWithDetector:wakeDetector];
     self.speechSynthesisService = [[SpeechSynthesisService alloc] init];
-    self.wakeSpeechService.delegate = self;
+    self.wakeWordService.delegate = self;
     self.messages = [NSMutableArray array];
 
     [self setupViews];
-    [self appendMessage:@"打开 App 后我会在前台监听“小星小星”。你也可以直接在这里输入闹钟需求。" role:ChatMessageRoleSystem];
-    [self requestSpeechPermissionAndStartWakeListening];
+    [self registerKeyboardNotifications];
+    [self appendMessage:@"打开 App 后我会用本地唤醒引擎监听“小星小星”，唤醒后才启动语音识别。当前内置开发 detector，接入正式 KWS 模型后会只识别唤醒词。" role:ChatMessageRoleSystem];
+    [self appendMessage:wakeStatusMessage role:ChatMessageRoleSystem];
+    [self requestMicrophonePermissionAndStartWakeListening];
+}
+
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    if (self.speechAuthorized && !self.isCallPresented && !self.wakeSpeechService.isListening) {
-        [self.wakeSpeechService startListening];
+    if (self.wakeAuthorized && !self.isCallPresented && !self.wakeWordService.isListening) {
+        [self.wakeWordService startListening];
     }
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
     if (!self.isCallPresented) {
-        [self.wakeSpeechService stopListening];
+        [self.wakeWordService stopListening];
     }
 }
 
@@ -128,6 +145,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     [sendButton addTarget:self action:@selector(sendTapped) forControlEvents:UIControlEventTouchUpInside];
     sendButton.translatesAutoresizingMaskIntoConstraints = NO;
     [inputBar addSubview:sendButton];
+    self.inputBarBottomConstraint = [inputBar.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-10];
 
     [NSLayoutConstraint activateConstraints:@[
         [titleLabel.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:18],
@@ -149,7 +167,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 
         [inputBar.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:14],
         [inputBar.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-14],
-        [inputBar.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-10],
+        self.inputBarBottomConstraint,
         [inputBar.heightAnchor constraintEqualToConstant:54],
 
         [self.textField.leadingAnchor constraintEqualToAnchor:inputBar.leadingAnchor constant:14],
@@ -161,11 +179,43 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     ]];
 }
 
-- (void)requestSpeechPermissionAndStartWakeListening {
-    [self.wakeSpeechService requestAuthorizationWithCompletion:^(BOOL granted, NSString *_Nullable message) {
-        self.speechAuthorized = granted;
+- (void)registerKeyboardNotifications {
+    [NSNotificationCenter.defaultCenter addObserver:self
+                                           selector:@selector(keyboardWillChangeFrame:)
+                                               name:UIKeyboardWillChangeFrameNotification
+                                             object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self
+                                           selector:@selector(keyboardWillHide:)
+                                               name:UIKeyboardWillHideNotification
+                                             object:nil];
+}
+
+- (void)keyboardWillChangeFrame:(NSNotification *)notification {
+    CGRect keyboardFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGRect keyboardFrameInView = [self.view convertRect:keyboardFrame fromView:nil];
+    CGFloat overlap = MAX(0.0, CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(keyboardFrameInView));
+    CGFloat adjustedOverlap = MAX(0.0, overlap - self.view.safeAreaInsets.bottom);
+    [self updateInputBarBottomConstant:-adjustedOverlap - 10 notification:notification];
+}
+
+- (void)keyboardWillHide:(NSNotification *)notification {
+    [self updateInputBarBottomConstant:-10 notification:notification];
+}
+
+- (void)updateInputBarBottomConstant:(CGFloat)constant notification:(NSNotification *)notification {
+    self.inputBarBottomConstraint.constant = constant;
+    NSTimeInterval duration = [notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationOptions options = ([notification.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue] << 16);
+    [UIView animateWithDuration:duration delay:0 options:options animations:^{
+        [self.view layoutIfNeeded];
+    } completion:nil];
+}
+
+- (void)requestMicrophonePermissionAndStartWakeListening {
+    [self.wakeWordService requestMicrophonePermissionWithCompletion:^(BOOL granted, NSString *_Nullable message) {
+        self.wakeAuthorized = granted;
         if (granted) {
-            [self.wakeSpeechService startListening];
+            [self.wakeWordService startListening];
         } else {
             self.statusLabel.text = message ?: @"语音权限不可用";
             [self appendMessage:self.statusLabel.text role:ChatMessageRoleSystem];
@@ -211,7 +261,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     }
 
     self.isCallPresented = YES;
-    [self.wakeSpeechService stopListening];
+    [self.wakeWordService stopListening];
     CallViewController *callViewController = [[CallViewController alloc] initWithIntentParser:self.intentParser];
     callViewController.delegate = self;
     [self presentViewController:callViewController animated:YES completion:nil];
@@ -222,14 +272,14 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 }
 
 - (void)speakAssistantText:(NSString *)text {
-    BOOL shouldResumeListening = self.speechAuthorized && !self.isCallPresented;
+    BOOL shouldResumeListening = self.wakeAuthorized && !self.isCallPresented;
     if (shouldResumeListening) {
-        [self.wakeSpeechService stopListening];
+        [self.wakeWordService stopListening];
     }
 
     [self.speechSynthesisService speakText:text completion:^{
         if (shouldResumeListening && !self.isCallPresented) {
-            [self.wakeSpeechService startListening];
+            [self.wakeWordService startListening];
         }
     }];
 }
@@ -278,26 +328,26 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     return YES;
 }
 
-#pragma mark - SpeechRecognitionServiceDelegate
+#pragma mark - LocalWakeWordServiceDelegate
 
-- (void)speechServiceDidStartListening {
-    self.statusLabel.text = @"前台监听中：请说“小星小星”";
+- (void)localWakeWordServiceDidStartListening {
+    self.statusLabel.text = @"本地唤醒监听中：请说“小星小星”";
 }
 
-- (void)speechServiceDidStopListening {
+- (void)localWakeWordServiceDidStopListening {
     self.statusLabel.text = self.isCallPresented ? @"通话中" : @"监听已暂停";
 }
 
-- (void)speechServiceDidRecognizeText:(NSString *)text isFinal:(BOOL)isFinal {
-    (void)isFinal;
-    self.statusLabel.text = [NSString stringWithFormat:@"听到：%@", text];
-    if (!self.isCallPresented && [text containsString:@"小星小星"]) {
-        [self appendMessage:@"检测到唤醒词“小星小星”，已打开通话页面。" role:ChatMessageRoleSystem];
-        [self openCallPage];
+- (void)localWakeWordServiceDidDetectWakeWordWithReason:(NSString *)reason {
+    if (self.isCallPresented) {
+        return;
     }
+    self.statusLabel.text = @"已唤醒，正在打开通话";
+    [self appendMessage:[NSString stringWithFormat:@"本地唤醒引擎已触发：%@", reason] role:ChatMessageRoleSystem];
+    [self openCallPage];
 }
 
-- (void)speechServiceDidFailWithMessage:(NSString *)message {
+- (void)localWakeWordServiceDidFailWithMessage:(NSString *)message {
     self.statusLabel.text = message;
 }
 
@@ -309,12 +359,17 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     [self appendMessage:assistantText role:ChatMessageRoleAssistant];
 }
 
+- (void)callViewController:(CallViewController *)controller didAppendAssistantText:(NSString *)assistantText {
+    (void)controller;
+    [self appendMessage:assistantText role:ChatMessageRoleAssistant];
+}
+
 - (void)callViewControllerDidClose:(CallViewController *)controller {
     (void)controller;
     self.isCallPresented = NO;
     [self appendMessage:@"通话已关闭，已回到 IM 聊天窗口。" role:ChatMessageRoleSystem];
-    if (self.speechAuthorized) {
-        [self.wakeSpeechService startListening];
+    if (self.wakeAuthorized) {
+        [self.wakeWordService startListening];
     }
 }
 

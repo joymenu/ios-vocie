@@ -13,6 +13,7 @@
 
 @property (nonatomic, strong) AVSpeechSynthesizer *synthesizer;
 @property (nonatomic, copy, nullable) void (^completion)(void);
+@property (nonatomic, strong, nullable) AVSpeechUtterance *activeUtterance;
 
 @end
 
@@ -41,10 +42,10 @@
     }
 
     if (self.synthesizer.isSpeaking) {
+        self.activeUtterance = nil;
+        self.completion = nil;
         [self.synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
     }
-
-    self.completion = completion;
 
     NSError *sessionError = nil;
     AVAudioSession *audioSession = [AVAudioSession sharedInstance];
@@ -60,28 +61,36 @@
     utterance.voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
     utterance.rate = 0.48;
     utterance.pitchMultiplier = 1.05;
+    self.activeUtterance = utterance;
+    self.completion = completion;
     [self.synthesizer speakUtterance:utterance];
 }
 
 - (void)stopSpeaking {
+    self.activeUtterance = nil;
     self.completion = nil;
     [self.synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance {
     (void)synthesizer;
-    (void)utterance;
+    if (utterance != self.activeUtterance) {
+        return;
+    }
     [self finishCompletion];
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didCancelSpeechUtterance:(AVSpeechUtterance *)utterance {
     (void)synthesizer;
-    (void)utterance;
+    if (utterance != self.activeUtterance) {
+        return;
+    }
     [self finishCompletion];
 }
 
 - (void)finishCompletion {
     void (^completion)(void) = self.completion;
+    self.activeUtterance = nil;
     self.completion = nil;
     if (completion) {
         dispatch_async(dispatch_get_main_queue(), completion);

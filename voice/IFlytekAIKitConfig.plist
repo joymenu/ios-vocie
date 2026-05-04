@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>appId</key>
+	<string>REPLACE_WITH_XFYUN_APP_ID</string>
+	<key>apiKey</key>
+	<string>REPLACE_WITH_XFYUN_API_KEY</string>
+	<key>apiSecret</key>
+	<string>REPLACE_WITH_XFYUN_API_SECRET</string>
+	<key>abilityId</key>
+	<string>e867a88f2</string>
+	<key>authType</key>
+	<integer>1</integer>
+	<key>keywordFile</key>
+	<string>keyword.txt</string>
+</dict>
+</plist>

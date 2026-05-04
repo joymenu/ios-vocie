@@ -15,6 +15,7 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol CallViewControllerDelegate <NSObject>
 
 - (void)callViewController:(CallViewController *)controller didReceiveUserText:(NSString *)userText assistantText:(NSString *)assistantText;
+- (void)callViewController:(CallViewController *)controller didAppendAssistantText:(NSString *)assistantText;
 - (void)callViewControllerDidClose:(CallViewController *)controller;
 
 @end

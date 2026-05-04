@@ -19,6 +19,7 @@
 @property (nonatomic, assign, getter=isListening) BOOL listening;
 @property (nonatomic, assign) BOOL shouldKeepListening;
 @property (nonatomic, assign) BOOL isRestarting;
+@property (nonatomic, assign) NSUInteger sessionGeneration;
 
 @end
 
@@ -29,6 +30,9 @@
     if (self) {
         _speechRecognizer = [[SFSpeechRecognizer alloc] initWithLocale:[NSLocale localeWithLocaleIdentifier:@"zh_CN"]];
         _audioEngine = [[AVAudioEngine alloc] init];
+        _reportsPartialResults = YES;
+        _maximumSessionDuration = 0;
+        _restartDelay = 0.35;
     }
     return self;
 }
@@ -70,6 +74,7 @@
 - (void)stopListening {
     self.shouldKeepListening = NO;
     self.isRestarting = NO;
+    self.sessionGeneration += 1;
     [self stopCurrentRecognitionSessionAndNotify:YES];
 }
 
@@ -104,7 +109,9 @@
     }
 
     self.recognitionRequest = [[SFSpeechAudioBufferRecognitionRequest alloc] init];
-    self.recognitionRequest.shouldReportPartialResults = YES;
+    self.recognitionRequest.shouldReportPartialResults = self.reportsPartialResults;
+    NSUInteger currentGeneration = self.sessionGeneration + 1;
+    self.sessionGeneration = currentGeneration;
 
     AVAudioInputNode *inputNode = self.audioEngine.inputNode;
     AVAudioFormat *recordingFormat = [inputNode outputFormatForBus:0];
@@ -153,7 +160,10 @@
     }
 
     self.listening = YES;
-    [self.delegate speechServiceDidStartListening];
+    [self notifyOnMain:^{
+        [self.delegate speechServiceDidStartListening];
+    }];
+    [self scheduleSessionLimitForGeneration:currentGeneration];
 }
 
 - (void)stopCurrentRecognitionSessionAndNotify:(BOOL)notify {
@@ -171,7 +181,17 @@
     self.listening = NO;
 
     if (notify && wasListening) {
-        [self.delegate speechServiceDidStopListening];
+        [self notifyOnMain:^{
+            [self.delegate speechServiceDidStopListening];
+        }];
+    }
+}
+
+- (void)notifyOnMain:(dispatch_block_t)block {
+    if (NSThread.isMainThread) {
+        block();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), block);
     }
 }
 
@@ -181,10 +201,28 @@
     }
 
     self.isRestarting = YES;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    NSTimeInterval delay = MAX(0.1, self.restartDelay);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         self.isRestarting = NO;
         if (self.shouldKeepListening && !self.isListening) {
             [self startCurrentRecognitionSession];
+        }
+    });
+}
+
+- (void)scheduleSessionLimitForGeneration:(NSUInteger)generation {
+    if (self.maximumSessionDuration <= 0) {
+        return;
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.maximumSessionDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (generation != self.sessionGeneration || !self.shouldKeepListening || !self.isListening) {
+            return;
+        }
+
+        [self stopCurrentRecognitionSessionAndNotify:YES];
+        if (self.shouldKeepListening) {
+            [self restartAfterDelay];
         }
     });
 }

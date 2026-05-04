@@ -25,7 +25,11 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UITextField *textField;
 @property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) NSLayoutConstraint *inputBarBottomConstraint;
 @property (nonatomic, copy) NSString *lastFinalSpeechText;
+@property (nonatomic, assign) BOOL speechAuthorized;
+@property (nonatomic, assign) BOOL hasPlayedOpeningPrompt;
+@property (nonatomic, assign) BOOL closing;
 
 @end
 
@@ -49,14 +53,25 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     self.speechService.delegate = self;
     [self setupViews];
     [self appendMessage:@"你好，我是小星。你可以直接说要设置的闹钟。" role:CallMessageRoleAssistant];
-    [self speakAssistantText:@"你好，我是小星。你可以直接说要设置的闹钟。"];
+    [self.delegate callViewController:self didAppendAssistantText:@"你好，我是小星。你可以直接说要设置的闹钟。"];
+    [self registerKeyboardNotifications];
+}
+
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    if (self.speechAuthorized) {
+        [self playOpeningPromptIfNeeded];
+        return;
+    }
+
     [self.speechService requestAuthorizationWithCompletion:^(BOOL granted, NSString *_Nullable message) {
+        self.speechAuthorized = granted;
         if (granted) {
-            [self.speechService startListening];
+            [self playOpeningPromptIfNeeded];
         } else {
             self.statusLabel.text = message ?: @"语音权限不可用";
         }
@@ -65,6 +80,8 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+    self.closing = YES;
+    [self.speechSynthesisService stopSpeaking];
     [self.speechService stopListening];
 }
 
@@ -136,6 +153,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     [sendButton addTarget:self action:@selector(sendTapped) forControlEvents:UIControlEventTouchUpInside];
     sendButton.translatesAutoresizingMaskIntoConstraints = NO;
     [inputBar addSubview:sendButton];
+    self.inputBarBottomConstraint = [inputBar.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-10];
 
     [NSLayoutConstraint activateConstraints:@[
         [closeButton.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:12],
@@ -161,7 +179,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 
         [inputBar.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:14],
         [inputBar.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-14],
-        [inputBar.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-10],
+        self.inputBarBottomConstraint,
         [inputBar.heightAnchor constraintEqualToConstant:54],
 
         [self.textField.leadingAnchor constraintEqualToAnchor:inputBar.leadingAnchor constant:14],
@@ -171,6 +189,38 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
         [sendButton.centerYAnchor constraintEqualToAnchor:inputBar.centerYAnchor],
         [sendButton.widthAnchor constraintEqualToConstant:48]
     ]];
+}
+
+- (void)registerKeyboardNotifications {
+    [NSNotificationCenter.defaultCenter addObserver:self
+                                           selector:@selector(keyboardWillChangeFrame:)
+                                               name:UIKeyboardWillChangeFrameNotification
+                                             object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self
+                                           selector:@selector(keyboardWillHide:)
+                                               name:UIKeyboardWillHideNotification
+                                             object:nil];
+}
+
+- (void)keyboardWillChangeFrame:(NSNotification *)notification {
+    CGRect keyboardFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGRect keyboardFrameInView = [self.view convertRect:keyboardFrame fromView:nil];
+    CGFloat overlap = MAX(0.0, CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(keyboardFrameInView));
+    CGFloat adjustedOverlap = MAX(0.0, overlap - self.view.safeAreaInsets.bottom);
+    [self updateInputBarBottomConstant:-adjustedOverlap - 10 notification:notification];
+}
+
+- (void)keyboardWillHide:(NSNotification *)notification {
+    [self updateInputBarBottomConstant:-10 notification:notification];
+}
+
+- (void)updateInputBarBottomConstant:(CGFloat)constant notification:(NSNotification *)notification {
+    self.inputBarBottomConstraint.constant = constant;
+    NSTimeInterval duration = [notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationOptions options = ([notification.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue] << 16);
+    [UIView animateWithDuration:duration delay:0 options:options animations:^{
+        [self.view layoutIfNeeded];
+    } completion:nil];
 }
 
 - (UIView *)buildAvatarView {
@@ -217,10 +267,11 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     }
 
     [self appendMessage:trimmedText role:CallMessageRoleUser];
+    self.statusLabel.text = @"正在理解你的需求";
     AlarmIntentResult *result = [self.intentParser handleUserText:trimmedText];
     [self appendMessage:result.assistantText role:CallMessageRoleAssistant];
     [self.delegate callViewController:self didReceiveUserText:trimmedText assistantText:result.assistantText];
-    [self speakAssistantText:result.spokenText ?: result.assistantText];
+    [self speakAssistantText:result.spokenText ?: result.assistantText resumeListeningWhenDone:YES];
 }
 
 - (void)appendMessage:(NSString *)text role:(CallMessageRole)role {
@@ -234,6 +285,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 }
 
 - (void)closeTapped {
+    self.closing = YES;
     [self.speechSynthesisService stopSpeaking];
     [self.speechService stopListening];
     [self.delegate callViewControllerDidClose:self];
@@ -244,15 +296,34 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     [self.view endEditing:YES];
 }
 
-- (void)speakAssistantText:(NSString *)text {
-    BOOL shouldResumeListening = self.speechService.isListening;
-    if (shouldResumeListening) {
+- (void)playOpeningPromptIfNeeded {
+    if (self.hasPlayedOpeningPrompt) {
+        [self beginListeningIfPossible];
+        return;
+    }
+
+    self.hasPlayedOpeningPrompt = YES;
+    [self speakAssistantText:@"你好，我是小星。你可以直接说要设置的闹钟。" resumeListeningWhenDone:YES];
+}
+
+- (void)beginListeningIfPossible {
+    if (!self.speechAuthorized || self.closing || !self.view.window || self.speechService.isListening || self.speechSynthesisService.isSpeaking) {
+        return;
+    }
+    [self.speechService startListening];
+}
+
+- (void)speakAssistantText:(NSString *)text resumeListeningWhenDone:(BOOL)resumeListening {
+    if (self.speechService.isListening) {
         [self.speechService stopListening];
     }
 
+    self.statusLabel.text = @"小星正在说话";
     [self.speechSynthesisService speakText:text completion:^{
-        if (shouldResumeListening && self.view.window) {
-            [self.speechService startListening];
+        if (resumeListening) {
+            [self beginListeningIfPossible];
+        } else if (!self.closing) {
+            self.statusLabel.text = @"语音监听已暂停";
         }
     }];
 }
@@ -299,19 +370,25 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 #pragma mark - SpeechRecognitionServiceDelegate
 
 - (void)speechServiceDidStartListening {
-    self.statusLabel.text = @"正在听你说话";
+    self.statusLabel.text = @"正在听你说话，说完后我会自动回复";
 }
 
 - (void)speechServiceDidStopListening {
-    self.statusLabel.text = @"语音监听已暂停";
+    if (!self.speechSynthesisService.isSpeaking && !self.closing) {
+        self.statusLabel.text = @"语音监听已暂停";
+    }
 }
 
 - (void)speechServiceDidRecognizeText:(NSString *)text isFinal:(BOOL)isFinal {
+    if (self.speechSynthesisService.isSpeaking) {
+        return;
+    }
     self.statusLabel.text = [NSString stringWithFormat:@"识别中：%@", text];
     if (!isFinal || [text isEqualToString:self.lastFinalSpeechText]) {
         return;
     }
     self.lastFinalSpeechText = text;
+    self.statusLabel.text = @"你说完了，小星正在处理";
     [self handleUserText:text];
 }
 

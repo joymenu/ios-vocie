@@ -22,6 +22,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, weak, nullable) id<SpeechRecognitionServiceDelegate> delegate;
 @property (nonatomic, readonly, getter=isListening) BOOL listening;
+@property (nonatomic, assign) BOOL reportsPartialResults;
+@property (nonatomic, assign) NSTimeInterval maximumSessionDuration;
+@property (nonatomic, assign) NSTimeInterval restartDelay;
 
 - (void)requestAuthorizationWithCompletion:(void (^)(BOOL granted, NSString *_Nullable message))completion;
 - (void)startListening;
