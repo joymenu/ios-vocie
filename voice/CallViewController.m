@@ -388,11 +388,10 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
         return;
     }
 
-    [self appendMessage:trimmedText role:CallMessageRoleUser];
     NSString *intentText = [WakeWordTextMatcher textByRemovingLeadingWakeWordsFromText:trimmedText];
     BOOL didRemoveWakeWord = ![intentText isEqualToString:trimmedText];
     if ([WakeWordTextMatcher isOnlyWakeWordText:trimmedText] || (didRemoveWakeWord && intentText.length == 0)) {
-        self.statusLabel.text = @"已在通话中，可以直接说提醒或查询需求";
+        self.statusLabel.text = @"已识别到唤醒词，请继续说需求";
         [self beginListeningIfPossible];
         return;
     }
@@ -401,10 +400,11 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
         intentText = trimmedText;
     }
 
+    [self appendMessage:intentText role:CallMessageRoleUser];
     self.statusLabel.text = @"正在理解你的需求";
     AlarmIntentResult *result = [self.intentParser handleUserText:intentText];
     [self appendMessage:result.assistantText role:CallMessageRoleAssistant];
-    [self.delegate callViewController:self didReceiveUserText:trimmedText assistantText:result.assistantText];
+    [self.delegate callViewController:self didReceiveUserText:intentText assistantText:result.assistantText];
     [self speakAssistantText:result.spokenText ?: result.assistantText resumeListeningWhenDone:YES];
 }
 
@@ -507,7 +507,12 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     if (self.speechSynthesisService.isSpeaking) {
         return;
     }
-    self.statusLabel.text = [NSString stringWithFormat:@"识别中：%@", text];
+    NSString *trimmedText = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if ([WakeWordTextMatcher isOnlyWakeWordText:trimmedText]) {
+        self.statusLabel.text = @"已识别到唤醒词，请继续说需求";
+    } else {
+        self.statusLabel.text = [NSString stringWithFormat:@"识别中：%@", text];
+    }
     if (!isFinal) {
         [self scheduleRecognitionFinishForText:text];
         return;
@@ -551,6 +556,12 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     }
 
     self.lastFinalSpeechText = trimmedText;
+    if ([WakeWordTextMatcher isOnlyWakeWordText:trimmedText]) {
+        self.statusLabel.text = @"已识别到唤醒词，请继续说需求";
+        [self beginListeningIfPossible];
+        return;
+    }
+
     self.statusLabel.text = @"你说完了，小星正在处理";
     [self handleUserText:trimmedText];
 }

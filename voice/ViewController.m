@@ -417,7 +417,6 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
         return;
     }
 
-    [self appendMessage:trimmedText role:ChatMessageRoleUser];
     NSString *intentText = [WakeWordTextMatcher textByRemovingLeadingWakeWordsFromText:trimmedText];
     BOOL didRemoveWakeWord = ![intentText isEqualToString:trimmedText];
     if ([WakeWordTextMatcher isOnlyWakeWordText:trimmedText] || (didRemoveWakeWord && intentText.length == 0)) {
@@ -431,6 +430,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
         intentText = trimmedText;
     }
 
+    [self appendMessage:intentText role:ChatMessageRoleUser];
     AlarmIntentResult *result = [self.intentParser handleUserText:intentText];
     [self appendMessage:result.assistantText role:ChatMessageRoleAssistant];
     [self speakAssistantText:result.spokenText ?: result.assistantText];
