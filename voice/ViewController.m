@@ -31,6 +31,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 
 @property (nonatomic, strong) UIView *avatarView;
 @property (nonatomic, strong) UILabel *avatarLabel;
+@property (nonatomic, strong) UIImageView *avatarIconView;
 @property (nonatomic, strong) UIView *bubbleView;
 @property (nonatomic, strong) UIStackView *textStackView;
 @property (nonatomic, strong) UILabel *roleLabel;
@@ -69,6 +70,11 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     self.avatarLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
     self.avatarLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.avatarView addSubview:self.avatarLabel];
+
+    self.avatarIconView = [[UIImageView alloc] init];
+    self.avatarIconView.contentMode = UIViewContentModeScaleAspectFit;
+    self.avatarIconView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.avatarView addSubview:self.avatarIconView];
 
     self.bubbleView = [[UIView alloc] init];
     self.bubbleView.layer.cornerRadius = 8;
@@ -109,6 +115,11 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
         [self.avatarLabel.topAnchor constraintEqualToAnchor:self.avatarView.topAnchor],
         [self.avatarLabel.bottomAnchor constraintEqualToAnchor:self.avatarView.bottomAnchor],
 
+        [self.avatarIconView.centerXAnchor constraintEqualToAnchor:self.avatarView.centerXAnchor],
+        [self.avatarIconView.centerYAnchor constraintEqualToAnchor:self.avatarView.centerYAnchor],
+        [self.avatarIconView.widthAnchor constraintEqualToConstant:16],
+        [self.avatarIconView.heightAnchor constraintEqualToConstant:16],
+
         [self.bubbleView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:7],
         [self.bubbleView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-7],
         [self.bubbleView.widthAnchor constraintLessThanOrEqualToAnchor:self.contentView.widthAnchor multiplier:0.74],
@@ -136,9 +147,11 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     ]];
 
     if (role == ChatMessageRoleUser) {
-        self.roleLabel.text = @"我";
-        self.avatarLabel.text = @"我";
-        self.avatarLabel.textColor = UIColor.whiteColor;
+        self.roleLabel.text = @"客户";
+        self.avatarLabel.text = @"";
+        self.avatarIconView.hidden = NO;
+        self.avatarIconView.image = [UIImage systemImageNamed:@"person.fill"];
+        self.avatarIconView.tintColor = UIColor.whiteColor;
         self.avatarView.backgroundColor = [UIColor colorWithRed:0.10 green:0.45 blue:0.92 alpha:1.0];
         self.bubbleView.backgroundColor = [UIColor colorWithRed:0.10 green:0.45 blue:0.92 alpha:1.0];
         self.bubbleView.layer.borderColor = [UIColor colorWithRed:0.10 green:0.45 blue:0.92 alpha:1.0].CGColor;
@@ -152,8 +165,10 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
         ]];
     } else if (role == ChatMessageRoleAssistant) {
         self.roleLabel.text = @"小星";
-        self.avatarLabel.text = @"星";
-        self.avatarLabel.textColor = [UIColor colorWithRed:0.08 green:0.22 blue:0.38 alpha:1.0];
+        self.avatarLabel.text = @"";
+        self.avatarIconView.hidden = NO;
+        self.avatarIconView.image = [UIImage systemImageNamed:@"sparkles"];
+        self.avatarIconView.tintColor = [UIColor colorWithRed:0.08 green:0.22 blue:0.38 alpha:1.0];
         self.avatarView.backgroundColor = [UIColor colorWithRed:0.86 green:0.93 blue:1.0 alpha:1.0];
         self.bubbleView.backgroundColor = UIColor.whiteColor;
         self.bubbleView.layer.borderColor = [UIColor colorWithRed:0.86 green:0.90 blue:0.94 alpha:1.0].CGColor;
@@ -166,6 +181,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
             self.bubbleLeadingToAvatarConstraint
         ]];
     } else {
+        self.avatarIconView.hidden = YES;
         self.bubbleView.backgroundColor = [UIColor colorWithRed:0.91 green:0.94 blue:0.97 alpha:1.0];
         self.bubbleView.layer.borderColor = [UIColor colorWithRed:0.84 green:0.88 blue:0.92 alpha:1.0].CGColor;
         self.messageLabel.textColor = [UIColor colorWithRed:0.38 green:0.45 blue:0.53 alpha:1.0];
