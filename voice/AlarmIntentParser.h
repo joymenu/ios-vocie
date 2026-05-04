@@ -12,6 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface AlarmIntentResult : NSObject
 
 @property (nonatomic, copy) NSString *assistantText;
+@property (nonatomic, copy) NSString *spokenText;
 @property (nonatomic, copy, nullable) NSString *jsonString;
 @property (nonatomic, assign, getter=isReady) BOOL ready;
 

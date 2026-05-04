@@ -24,12 +24,14 @@
 
     if (trimmedText.length == 0) {
         result.assistantText = @"我在，请说出你想设置的闹钟。";
+        result.spokenText = result.assistantText;
         return result;
     }
 
     BOOL isAlarmIntent = [trimmedText containsString:@"闹钟"] || self.pendingOriginalText.length > 0;
     if (!isAlarmIntent) {
         result.assistantText = @"我目前可以先帮你设置闹钟。";
+        result.spokenText = result.assistantText;
         return result;
     }
 
@@ -41,6 +43,7 @@
     if (time.length == 0) {
         self.pendingOriginalText = combinedText;
         result.assistantText = @"好的，请问闹钟设置在什么时间？";
+        result.spokenText = result.assistantText;
         return result;
     }
 
@@ -62,6 +65,7 @@
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:NSJSONWritingPrettyPrinted error:&jsonError];
     if (!jsonData || jsonError) {
         result.assistantText = @"闹钟信息已识别，但生成 JSON 时失败了。";
+        result.spokenText = result.assistantText;
         return result;
     }
 
@@ -70,6 +74,7 @@
     result.ready = YES;
     result.jsonString = jsonString;
     result.assistantText = [NSString stringWithFormat:@"已解析为 JSON，后续可调用服务端接口：\n%@", jsonString];
+    result.spokenText = @"好的，闹钟信息已经解析完成，后续可以调用服务端接口。";
     [self submitParsedAlarmJSON:jsonString];
     return result;
 }

@@ -9,6 +9,7 @@
 
 #import "AlarmIntentParser.h"
 #import "SpeechRecognitionService.h"
+#import "SpeechSynthesisService.h"
 
 typedef NS_ENUM(NSInteger, CallMessageRole) {
     CallMessageRoleUser,
@@ -19,6 +20,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 
 @property (nonatomic, strong) AlarmIntentParser *intentParser;
 @property (nonatomic, strong) SpeechRecognitionService *speechService;
+@property (nonatomic, strong) SpeechSynthesisService *speechSynthesisService;
 @property (nonatomic, strong) NSMutableArray<NSDictionary<NSString *, id> *> *messages;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UITextField *textField;
@@ -34,6 +36,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     if (self) {
         _intentParser = intentParser;
         _speechService = [[SpeechRecognitionService alloc] init];
+        _speechSynthesisService = [[SpeechSynthesisService alloc] init];
         _messages = [NSMutableArray array];
         self.modalPresentationStyle = UIModalPresentationFullScreen;
     }
@@ -46,6 +49,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     self.speechService.delegate = self;
     [self setupViews];
     [self appendMessage:@"你好，我是小星。你可以直接说要设置的闹钟。" role:CallMessageRoleAssistant];
+    [self speakAssistantText:@"你好，我是小星。你可以直接说要设置的闹钟。"];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -97,11 +101,16 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.backgroundColor = UIColor.clearColor;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 72;
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.tableView];
+
+    UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
+    tapGesture.cancelsTouchesInView = NO;
+    [self.view addGestureRecognizer:tapGesture];
 
     UIView *inputBar = [[UIView alloc] init];
     inputBar.backgroundColor = UIColor.whiteColor;
@@ -198,6 +207,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 - (void)sendTapped {
     [self handleUserText:self.textField.text];
     self.textField.text = @"";
+    [self dismissKeyboard];
 }
 
 - (void)handleUserText:(NSString *)text {
@@ -210,6 +220,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     AlarmIntentResult *result = [self.intentParser handleUserText:trimmedText];
     [self appendMessage:result.assistantText role:CallMessageRoleAssistant];
     [self.delegate callViewController:self didReceiveUserText:trimmedText assistantText:result.assistantText];
+    [self speakAssistantText:result.spokenText ?: result.assistantText];
 }
 
 - (void)appendMessage:(NSString *)text role:(CallMessageRole)role {
@@ -223,9 +234,27 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 }
 
 - (void)closeTapped {
+    [self.speechSynthesisService stopSpeaking];
     [self.speechService stopListening];
     [self.delegate callViewControllerDidClose:self];
     [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)dismissKeyboard {
+    [self.view endEditing:YES];
+}
+
+- (void)speakAssistantText:(NSString *)text {
+    BOOL shouldResumeListening = self.speechService.isListening;
+    if (shouldResumeListening) {
+        [self.speechService stopListening];
+    }
+
+    [self.speechSynthesisService speakText:text completion:^{
+        if (shouldResumeListening && self.view.window) {
+            [self.speechService startListening];
+        }
+    }];
 }
 
 #pragma mark - UITableViewDataSource
@@ -263,6 +292,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
     [self handleUserText:textField.text];
     textField.text = @"";
+    [textField resignFirstResponder];
     return YES;
 }
 
