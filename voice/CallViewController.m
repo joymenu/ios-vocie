@@ -1,90 +1,97 @@
 //
-//  ViewController.m
+//  CallViewController.m
 //  voice
 //
-//  Created by bbu on 2026/5/4.
+//  Created by Codex on 2026/5/4.
 //
 
-#import "ViewController.h"
+#import "CallViewController.h"
 
 #import "AlarmIntentParser.h"
-#import "CallViewController.h"
 #import "SpeechRecognitionService.h"
 
-typedef NS_ENUM(NSInteger, ChatMessageRole) {
-    ChatMessageRoleUser,
-    ChatMessageRoleAssistant,
-    ChatMessageRoleSystem
+typedef NS_ENUM(NSInteger, CallMessageRole) {
+    CallMessageRoleUser,
+    CallMessageRoleAssistant
 };
 
-@interface ViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, SpeechRecognitionServiceDelegate, CallViewControllerDelegate>
+@interface CallViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, SpeechRecognitionServiceDelegate>
 
 @property (nonatomic, strong) AlarmIntentParser *intentParser;
-@property (nonatomic, strong) SpeechRecognitionService *wakeSpeechService;
+@property (nonatomic, strong) SpeechRecognitionService *speechService;
 @property (nonatomic, strong) NSMutableArray<NSDictionary<NSString *, id> *> *messages;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UITextField *textField;
 @property (nonatomic, strong) UILabel *statusLabel;
-@property (nonatomic, assign) BOOL isCallPresented;
-@property (nonatomic, assign) BOOL speechAuthorized;
+@property (nonatomic, copy) NSString *lastFinalSpeechText;
 
 @end
 
-@implementation ViewController
+@implementation CallViewController
+
+- (instancetype)initWithIntentParser:(AlarmIntentParser *)intentParser {
+    self = [super initWithNibName:nil bundle:nil];
+    if (self) {
+        _intentParser = intentParser;
+        _speechService = [[SpeechRecognitionService alloc] init];
+        _messages = [NSMutableArray array];
+        self.modalPresentationStyle = UIModalPresentationFullScreen;
+    }
+    return self;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.intentParser = [[AlarmIntentParser alloc] init];
-    self.wakeSpeechService = [[SpeechRecognitionService alloc] init];
-    self.wakeSpeechService.delegate = self;
-    self.messages = [NSMutableArray array];
-
+    self.view.backgroundColor = [UIColor colorWithRed:0.95 green:0.98 blue:1.0 alpha:1.0];
+    self.speechService.delegate = self;
     [self setupViews];
-    [self appendMessage:@"打开 App 后我会在前台监听“小星小星”。你也可以直接在这里输入闹钟需求。" role:ChatMessageRoleSystem];
-    [self requestSpeechPermissionAndStartWakeListening];
+    [self appendMessage:@"你好，我是小星。你可以直接说要设置的闹钟。" role:CallMessageRoleAssistant];
 }
 
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    if (self.speechAuthorized && !self.isCallPresented && !self.wakeSpeechService.isListening) {
-        [self.wakeSpeechService startListening];
-    }
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [self.speechService requestAuthorizationWithCompletion:^(BOOL granted, NSString *_Nullable message) {
+        if (granted) {
+            [self.speechService startListening];
+        } else {
+            self.statusLabel.text = message ?: @"语音权限不可用";
+        }
+    }];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
-    if (!self.isCallPresented) {
-        [self.wakeSpeechService stopListening];
-    }
+    [self.speechService stopListening];
 }
 
 - (void)setupViews {
-    self.view.backgroundColor = [UIColor colorWithRed:0.97 green:0.98 blue:0.99 alpha:1.0];
     UILayoutGuide *safeArea = self.view.safeAreaLayoutGuide;
 
+    UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [closeButton setTitle:@"关闭" forState:UIControlStateNormal];
+    closeButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    [closeButton addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
+    closeButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:closeButton];
+
     UILabel *titleLabel = [[UILabel alloc] init];
-    titleLabel.text = @"小星 IM";
-    titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
-    titleLabel.textColor = [UIColor colorWithRed:0.07 green:0.12 blue:0.18 alpha:1.0];
+    titleLabel.text = @"小星通话";
+    titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold];
+    titleLabel.textColor = [UIColor colorWithRed:0.08 green:0.14 blue:0.20 alpha:1.0];
     titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:titleLabel];
 
+    UIView *avatarView = [self buildAvatarView];
+    avatarView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:avatarView];
+
     self.statusLabel = [[UILabel alloc] init];
-    self.statusLabel.text = @"准备请求语音权限";
+    self.statusLabel.text = @"准备监听";
+    self.statusLabel.textAlignment = NSTextAlignmentCenter;
     self.statusLabel.font = [UIFont systemFontOfSize:13];
     self.statusLabel.textColor = [UIColor colorWithRed:0.34 green:0.42 blue:0.50 alpha:1.0];
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.statusLabel];
-
-    UIButton *callButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [callButton setTitle:@"通话" forState:UIControlStateNormal];
-    callButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    callButton.backgroundColor = [UIColor colorWithRed:0.10 green:0.45 blue:0.92 alpha:1.0];
-    [callButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    callButton.layer.cornerRadius = 8;
-    [callButton addTarget:self action:@selector(openCallPage) forControlEvents:UIControlEventTouchUpInside];
-    callButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:callButton];
 
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.dataSource = self;
@@ -107,7 +114,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     [self.view addSubview:inputBar];
 
     self.textField = [[UITextField alloc] init];
-    self.textField.placeholder = @"例如：请帮我设置一个明天早8点的闹钟";
+    self.textField.placeholder = @"输入或直接说出闹钟需求";
     self.textField.font = [UIFont systemFontOfSize:16];
     self.textField.returnKeyType = UIReturnKeySend;
     self.textField.delegate = self;
@@ -122,19 +129,23 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     [inputBar addSubview:sendButton];
 
     [NSLayoutConstraint activateConstraints:@[
-        [titleLabel.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:18],
-        [titleLabel.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:20],
+        [closeButton.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:12],
+        [closeButton.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-20],
+        [closeButton.heightAnchor constraintEqualToConstant:36],
 
-        [callButton.centerYAnchor constraintEqualToAnchor:titleLabel.centerYAnchor],
-        [callButton.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-20],
-        [callButton.widthAnchor constraintEqualToConstant:64],
-        [callButton.heightAnchor constraintEqualToConstant:36],
+        [titleLabel.centerYAnchor constraintEqualToAnchor:closeButton.centerYAnchor],
+        [titleLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
 
-        [self.statusLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:6],
-        [self.statusLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
-        [self.statusLabel.trailingAnchor constraintEqualToAnchor:callButton.trailingAnchor],
+        [avatarView.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:18],
+        [avatarView.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [avatarView.widthAnchor constraintEqualToConstant:132],
+        [avatarView.heightAnchor constraintEqualToConstant:132],
 
-        [self.tableView.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:14],
+        [self.statusLabel.topAnchor constraintEqualToAnchor:avatarView.bottomAnchor constant:10],
+        [self.statusLabel.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:20],
+        [self.statusLabel.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-20],
+
+        [self.tableView.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:10],
         [self.tableView.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor],
         [self.tableView.bottomAnchor constraintEqualToAnchor:inputBar.topAnchor constant:-10],
@@ -153,16 +164,35 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     ]];
 }
 
-- (void)requestSpeechPermissionAndStartWakeListening {
-    [self.wakeSpeechService requestAuthorizationWithCompletion:^(BOOL granted, NSString *_Nullable message) {
-        self.speechAuthorized = granted;
-        if (granted) {
-            [self.wakeSpeechService startListening];
-        } else {
-            self.statusLabel.text = message ?: @"语音权限不可用";
-            [self appendMessage:self.statusLabel.text role:ChatMessageRoleSystem];
-        }
-    }];
+- (UIView *)buildAvatarView {
+    UIView *container = [[UIView alloc] init];
+    container.backgroundColor = [UIColor colorWithRed:0.24 green:0.60 blue:1.0 alpha:1.0];
+    container.layer.cornerRadius = 66;
+
+    UILabel *faceLabel = [[UILabel alloc] init];
+    faceLabel.text = @"^_^";
+    faceLabel.textAlignment = NSTextAlignmentCenter;
+    faceLabel.font = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
+    faceLabel.textColor = UIColor.whiteColor;
+    faceLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [container addSubview:faceLabel];
+
+    UILabel *nameLabel = [[UILabel alloc] init];
+    nameLabel.text = @"小星";
+    nameLabel.textAlignment = NSTextAlignmentCenter;
+    nameLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    nameLabel.textColor = UIColor.whiteColor;
+    nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [container addSubview:nameLabel];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [faceLabel.centerXAnchor constraintEqualToAnchor:container.centerXAnchor],
+        [faceLabel.centerYAnchor constraintEqualToAnchor:container.centerYAnchor constant:-12],
+        [nameLabel.topAnchor constraintEqualToAnchor:faceLabel.bottomAnchor constant:4],
+        [nameLabel.centerXAnchor constraintEqualToAnchor:container.centerXAnchor]
+    ]];
+
+    return container;
 }
 
 - (void)sendTapped {
@@ -176,16 +206,13 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
         return;
     }
 
-    [self appendMessage:trimmedText role:ChatMessageRoleUser];
+    [self appendMessage:trimmedText role:CallMessageRoleUser];
     AlarmIntentResult *result = [self.intentParser handleUserText:trimmedText];
-    [self appendMessage:result.assistantText role:ChatMessageRoleAssistant];
+    [self appendMessage:result.assistantText role:CallMessageRoleAssistant];
+    [self.delegate callViewController:self didReceiveUserText:trimmedText assistantText:result.assistantText];
 }
 
-- (void)appendMessage:(NSString *)text role:(ChatMessageRole)role {
-    if (text.length == 0) {
-        return;
-    }
-
+- (void)appendMessage:(NSString *)text role:(CallMessageRole)role {
     [self.messages addObject:@{
         @"text": text,
         @"role": @(role)
@@ -195,16 +222,10 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionBottom animated:YES];
 }
 
-- (void)openCallPage {
-    if (self.isCallPresented) {
-        return;
-    }
-
-    self.isCallPresented = YES;
-    [self.wakeSpeechService stopListening];
-    CallViewController *callViewController = [[CallViewController alloc] initWithIntentParser:self.intentParser];
-    callViewController.delegate = self;
-    [self presentViewController:callViewController animated:YES completion:nil];
+- (void)closeTapped {
+    [self.speechService stopListening];
+    [self.delegate callViewControllerDidClose:self];
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 #pragma mark - UITableViewDataSource
@@ -216,7 +237,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    static NSString *reuseIdentifier = @"ChatMessageCell";
+    static NSString *reuseIdentifier = @"CallMessageCell";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuseIdentifier];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuseIdentifier];
@@ -228,16 +249,11 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     }
 
     NSDictionary<NSString *, id> *message = self.messages[indexPath.row];
-    ChatMessageRole role = [message[@"role"] integerValue];
-    BOOL isUser = role == ChatMessageRoleUser;
-    BOOL isSystem = role == ChatMessageRoleSystem;
-
+    BOOL isUser = [message[@"role"] integerValue] == CallMessageRoleUser;
     cell.textLabel.text = message[@"text"];
     cell.textLabel.textAlignment = isUser ? NSTextAlignmentRight : NSTextAlignmentLeft;
-    cell.textLabel.textColor = isSystem
-        ? [UIColor colorWithRed:0.45 green:0.50 blue:0.56 alpha:1.0]
-        : (isUser ? [UIColor colorWithRed:0.05 green:0.24 blue:0.50 alpha:1.0] : [UIColor colorWithRed:0.08 green:0.14 blue:0.20 alpha:1.0]);
-    cell.detailTextLabel.text = isSystem ? @"系统" : (isUser ? @"我" : @"小星");
+    cell.textLabel.textColor = isUser ? [UIColor colorWithRed:0.05 green:0.24 blue:0.50 alpha:1.0] : [UIColor colorWithRed:0.08 green:0.14 blue:0.20 alpha:1.0];
+    cell.detailTextLabel.text = isUser ? @"我" : @"小星";
     cell.detailTextLabel.textAlignment = isUser ? NSTextAlignmentRight : NSTextAlignmentLeft;
     return cell;
 }
@@ -253,41 +269,24 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 #pragma mark - SpeechRecognitionServiceDelegate
 
 - (void)speechServiceDidStartListening {
-    self.statusLabel.text = @"前台监听中：请说“小星小星”";
+    self.statusLabel.text = @"正在听你说话";
 }
 
 - (void)speechServiceDidStopListening {
-    self.statusLabel.text = self.isCallPresented ? @"通话中" : @"监听已暂停";
+    self.statusLabel.text = @"语音监听已暂停";
 }
 
 - (void)speechServiceDidRecognizeText:(NSString *)text isFinal:(BOOL)isFinal {
-    (void)isFinal;
-    self.statusLabel.text = [NSString stringWithFormat:@"听到：%@", text];
-    if (!self.isCallPresented && [text containsString:@"小星小星"]) {
-        [self appendMessage:@"检测到唤醒词“小星小星”，已打开通话页面。" role:ChatMessageRoleSystem];
-        [self openCallPage];
+    self.statusLabel.text = [NSString stringWithFormat:@"识别中：%@", text];
+    if (!isFinal || [text isEqualToString:self.lastFinalSpeechText]) {
+        return;
     }
+    self.lastFinalSpeechText = text;
+    [self handleUserText:text];
 }
 
 - (void)speechServiceDidFailWithMessage:(NSString *)message {
     self.statusLabel.text = message;
-}
-
-#pragma mark - CallViewControllerDelegate
-
-- (void)callViewController:(CallViewController *)controller didReceiveUserText:(NSString *)userText assistantText:(NSString *)assistantText {
-    (void)controller;
-    [self appendMessage:userText role:ChatMessageRoleUser];
-    [self appendMessage:assistantText role:ChatMessageRoleAssistant];
-}
-
-- (void)callViewControllerDidClose:(CallViewController *)controller {
-    (void)controller;
-    self.isCallPresented = NO;
-    [self appendMessage:@"通话已关闭，已回到 IM 聊天窗口。" role:ChatMessageRoleSystem];
-    if (self.speechAuthorized) {
-        [self.wakeSpeechService startListening];
-    }
 }
 
 @end
