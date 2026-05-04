@@ -13,12 +13,173 @@
 #import "LocalWakeWordService.h"
 #import "SpeechRecognitionService.h"
 #import "SpeechSynthesisService.h"
+#import "WakeWordTextMatcher.h"
 
 typedef NS_ENUM(NSInteger, ChatMessageRole) {
     ChatMessageRoleUser,
     ChatMessageRoleAssistant,
     ChatMessageRoleSystem
 };
+
+@interface ChatMessageCell : UITableViewCell
+
+- (void)configureWithText:(NSString *)text role:(ChatMessageRole)role;
+
+@end
+
+@interface ChatMessageCell ()
+
+@property (nonatomic, strong) UIView *avatarView;
+@property (nonatomic, strong) UILabel *avatarLabel;
+@property (nonatomic, strong) UIView *bubbleView;
+@property (nonatomic, strong) UIStackView *textStackView;
+@property (nonatomic, strong) UILabel *roleLabel;
+@property (nonatomic, strong) UILabel *messageLabel;
+@property (nonatomic, strong) NSLayoutConstraint *avatarLeadingConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *avatarTrailingConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleLeadingToAvatarConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleTrailingToAvatarConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleCenterXConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleSystemLeadingConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleSystemTrailingConstraint;
+
+@end
+
+@implementation ChatMessageCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (self) {
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+        self.backgroundColor = UIColor.clearColor;
+        self.contentView.backgroundColor = UIColor.clearColor;
+        [self setupMessageViews];
+    }
+    return self;
+}
+
+- (void)setupMessageViews {
+    self.avatarView = [[UIView alloc] init];
+    self.avatarView.layer.cornerRadius = 15;
+    self.avatarView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.avatarView];
+
+    self.avatarLabel = [[UILabel alloc] init];
+    self.avatarLabel.textAlignment = NSTextAlignmentCenter;
+    self.avatarLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    self.avatarLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.avatarView addSubview:self.avatarLabel];
+
+    self.bubbleView = [[UIView alloc] init];
+    self.bubbleView.layer.cornerRadius = 8;
+    self.bubbleView.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
+    self.bubbleView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.bubbleView];
+
+    self.roleLabel = [[UILabel alloc] init];
+    self.roleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    self.roleLabel.textColor = [UIColor colorWithRed:0.39 green:0.46 blue:0.54 alpha:1.0];
+
+    self.messageLabel = [[UILabel alloc] init];
+    self.messageLabel.numberOfLines = 0;
+    self.messageLabel.font = [UIFont systemFontOfSize:15];
+    self.messageLabel.lineBreakMode = NSLineBreakByWordWrapping;
+
+    self.textStackView = [[UIStackView alloc] initWithArrangedSubviews:@[self.roleLabel, self.messageLabel]];
+    self.textStackView.axis = UILayoutConstraintAxisVertical;
+    self.textStackView.spacing = 3;
+    self.textStackView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.bubbleView addSubview:self.textStackView];
+
+    self.avatarLeadingConstraint = [self.avatarView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16];
+    self.avatarTrailingConstraint = [self.avatarView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16];
+    self.bubbleLeadingToAvatarConstraint = [self.bubbleView.leadingAnchor constraintEqualToAnchor:self.avatarView.trailingAnchor constant:8];
+    self.bubbleTrailingToAvatarConstraint = [self.bubbleView.trailingAnchor constraintEqualToAnchor:self.avatarView.leadingAnchor constant:-8];
+    self.bubbleCenterXConstraint = [self.bubbleView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor];
+    self.bubbleSystemLeadingConstraint = [self.bubbleView.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.contentView.leadingAnchor constant:40];
+    self.bubbleSystemTrailingConstraint = [self.bubbleView.trailingAnchor constraintLessThanOrEqualToAnchor:self.contentView.trailingAnchor constant:-40];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.avatarView.topAnchor constraintEqualToAnchor:self.bubbleView.topAnchor constant:2],
+        [self.avatarView.widthAnchor constraintEqualToConstant:30],
+        [self.avatarView.heightAnchor constraintEqualToConstant:30],
+
+        [self.avatarLabel.leadingAnchor constraintEqualToAnchor:self.avatarView.leadingAnchor],
+        [self.avatarLabel.trailingAnchor constraintEqualToAnchor:self.avatarView.trailingAnchor],
+        [self.avatarLabel.topAnchor constraintEqualToAnchor:self.avatarView.topAnchor],
+        [self.avatarLabel.bottomAnchor constraintEqualToAnchor:self.avatarView.bottomAnchor],
+
+        [self.bubbleView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:7],
+        [self.bubbleView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-7],
+        [self.bubbleView.widthAnchor constraintLessThanOrEqualToAnchor:self.contentView.widthAnchor multiplier:0.74],
+
+        [self.textStackView.leadingAnchor constraintEqualToAnchor:self.bubbleView.leadingAnchor constant:12],
+        [self.textStackView.trailingAnchor constraintEqualToAnchor:self.bubbleView.trailingAnchor constant:-12],
+        [self.textStackView.topAnchor constraintEqualToAnchor:self.bubbleView.topAnchor constant:9],
+        [self.textStackView.bottomAnchor constraintEqualToAnchor:self.bubbleView.bottomAnchor constant:-10]
+    ]];
+}
+
+- (void)configureWithText:(NSString *)text role:(ChatMessageRole)role {
+    self.messageLabel.text = text;
+    self.roleLabel.hidden = role == ChatMessageRoleSystem;
+    self.avatarView.hidden = role == ChatMessageRoleSystem;
+
+    [NSLayoutConstraint deactivateConstraints:@[
+        self.avatarLeadingConstraint,
+        self.avatarTrailingConstraint,
+        self.bubbleLeadingToAvatarConstraint,
+        self.bubbleTrailingToAvatarConstraint,
+        self.bubbleCenterXConstraint,
+        self.bubbleSystemLeadingConstraint,
+        self.bubbleSystemTrailingConstraint
+    ]];
+
+    if (role == ChatMessageRoleUser) {
+        self.roleLabel.text = @"我";
+        self.avatarLabel.text = @"我";
+        self.avatarLabel.textColor = UIColor.whiteColor;
+        self.avatarView.backgroundColor = [UIColor colorWithRed:0.10 green:0.45 blue:0.92 alpha:1.0];
+        self.bubbleView.backgroundColor = [UIColor colorWithRed:0.10 green:0.45 blue:0.92 alpha:1.0];
+        self.bubbleView.layer.borderColor = [UIColor colorWithRed:0.10 green:0.45 blue:0.92 alpha:1.0].CGColor;
+        self.messageLabel.textColor = UIColor.whiteColor;
+        self.messageLabel.textAlignment = NSTextAlignmentLeft;
+        self.roleLabel.textAlignment = NSTextAlignmentRight;
+        self.roleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.78];
+        [NSLayoutConstraint activateConstraints:@[
+            self.avatarTrailingConstraint,
+            self.bubbleTrailingToAvatarConstraint
+        ]];
+    } else if (role == ChatMessageRoleAssistant) {
+        self.roleLabel.text = @"小星";
+        self.avatarLabel.text = @"星";
+        self.avatarLabel.textColor = [UIColor colorWithRed:0.08 green:0.22 blue:0.38 alpha:1.0];
+        self.avatarView.backgroundColor = [UIColor colorWithRed:0.86 green:0.93 blue:1.0 alpha:1.0];
+        self.bubbleView.backgroundColor = UIColor.whiteColor;
+        self.bubbleView.layer.borderColor = [UIColor colorWithRed:0.86 green:0.90 blue:0.94 alpha:1.0].CGColor;
+        self.messageLabel.textColor = [UIColor colorWithRed:0.08 green:0.14 blue:0.20 alpha:1.0];
+        self.messageLabel.textAlignment = NSTextAlignmentLeft;
+        self.roleLabel.textAlignment = NSTextAlignmentLeft;
+        self.roleLabel.textColor = [UIColor colorWithRed:0.39 green:0.46 blue:0.54 alpha:1.0];
+        [NSLayoutConstraint activateConstraints:@[
+            self.avatarLeadingConstraint,
+            self.bubbleLeadingToAvatarConstraint
+        ]];
+    } else {
+        self.bubbleView.backgroundColor = [UIColor colorWithRed:0.91 green:0.94 blue:0.97 alpha:1.0];
+        self.bubbleView.layer.borderColor = [UIColor colorWithRed:0.84 green:0.88 blue:0.92 alpha:1.0].CGColor;
+        self.messageLabel.textColor = [UIColor colorWithRed:0.38 green:0.45 blue:0.53 alpha:1.0];
+        self.messageLabel.textAlignment = NSTextAlignmentCenter;
+        [NSLayoutConstraint activateConstraints:@[
+            self.avatarLeadingConstraint,
+            self.bubbleCenterXConstraint,
+            self.bubbleSystemLeadingConstraint,
+            self.bubbleSystemTrailingConstraint
+        ]];
+    }
+}
+
+@end
 
 @interface ViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, LocalWakeWordServiceDelegate, CallViewControllerDelegate>
 
@@ -55,7 +216,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 
     [self setupViews];
     [self registerKeyboardNotifications];
-    [self appendMessage:@"打开 App 后我会用本地唤醒引擎监听“小星小星”，唤醒后才启动语音识别。当前内置开发 detector，接入正式 KWS 模型后会只识别唤醒词。" role:ChatMessageRoleSystem];
+    [self appendMessage:@"打开 App 后我会用本地唤醒引擎监听“小星小星”，文本识别也兼容“小心小心”，唤醒后才启动语音识别。当前内置开发 detector，接入正式 KWS 模型后会只识别唤醒词。" role:ChatMessageRoleSystem];
     [self appendMessage:wakeStatusMessage role:ChatMessageRoleSystem];
     [self requestMicrophonePermissionAndStartWakeListening];
 }
@@ -114,7 +275,9 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     self.tableView.backgroundColor = UIColor.clearColor;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 72;
+    self.tableView.contentInset = UIEdgeInsetsMake(6, 0, 10, 0);
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.tableView registerClass:ChatMessageCell.class forCellReuseIdentifier:@"ChatMessageCell"];
     [self.view addSubview:self.tableView];
 
     UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
@@ -132,7 +295,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     [self.view addSubview:inputBar];
 
     self.textField = [[UITextField alloc] init];
-    self.textField.placeholder = @"例如：请帮我设置一个明天早8点的闹钟";
+    self.textField.placeholder = @"例如：明天早8点提醒吃药 / 查一下现在心率";
     self.textField.font = [UIFont systemFontOfSize:16];
     self.textField.returnKeyType = UIReturnKeySend;
     self.textField.delegate = self;
@@ -224,9 +387,12 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 }
 
 - (void)sendTapped {
+    [self submitCurrentText];
+}
+
+- (void)submitCurrentText {
     [self handleUserText:self.textField.text];
     self.textField.text = @"";
-    [self dismissKeyboard];
 }
 
 - (void)handleUserText:(NSString *)text {
@@ -236,7 +402,20 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     }
 
     [self appendMessage:trimmedText role:ChatMessageRoleUser];
-    AlarmIntentResult *result = [self.intentParser handleUserText:trimmedText];
+    NSString *intentText = [WakeWordTextMatcher textByRemovingLeadingWakeWordsFromText:trimmedText];
+    BOOL didRemoveWakeWord = ![intentText isEqualToString:trimmedText];
+    if ([WakeWordTextMatcher isOnlyWakeWordText:trimmedText] || (didRemoveWakeWord && intentText.length == 0)) {
+        self.statusLabel.text = @"文本唤醒已触发，正在打开通话";
+        [self appendMessage:@"已识别到唤醒词，正在打开通话。" role:ChatMessageRoleSystem];
+        [self openCallPage];
+        return;
+    }
+
+    if (intentText.length == 0) {
+        intentText = trimmedText;
+    }
+
+    AlarmIntentResult *result = [self.intentParser handleUserText:intentText];
     [self appendMessage:result.assistantText role:ChatMessageRoleAssistant];
     [self speakAssistantText:result.spokenText ?: result.assistantText];
 }
@@ -294,38 +473,19 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *reuseIdentifier = @"ChatMessageCell";
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuseIdentifier];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuseIdentifier];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.backgroundColor = UIColor.clearColor;
-        cell.textLabel.numberOfLines = 0;
-        cell.textLabel.font = [UIFont systemFontOfSize:15];
-        cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
-    }
+    ChatMessageCell *cell = [tableView dequeueReusableCellWithIdentifier:reuseIdentifier forIndexPath:indexPath];
 
     NSDictionary<NSString *, id> *message = self.messages[indexPath.row];
     ChatMessageRole role = [message[@"role"] integerValue];
-    BOOL isUser = role == ChatMessageRoleUser;
-    BOOL isSystem = role == ChatMessageRoleSystem;
-
-    cell.textLabel.text = message[@"text"];
-    cell.textLabel.textAlignment = isUser ? NSTextAlignmentRight : NSTextAlignmentLeft;
-    cell.textLabel.textColor = isSystem
-        ? [UIColor colorWithRed:0.45 green:0.50 blue:0.56 alpha:1.0]
-        : (isUser ? [UIColor colorWithRed:0.05 green:0.24 blue:0.50 alpha:1.0] : [UIColor colorWithRed:0.08 green:0.14 blue:0.20 alpha:1.0]);
-    cell.detailTextLabel.text = isSystem ? @"系统" : (isUser ? @"我" : @"小星");
-    cell.detailTextLabel.textAlignment = isUser ? NSTextAlignmentRight : NSTextAlignmentLeft;
+    [cell configureWithText:message[@"text"] role:role];
     return cell;
 }
 
 #pragma mark - UITextFieldDelegate
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
-    [self handleUserText:textField.text];
-    textField.text = @"";
-    [textField resignFirstResponder];
-    return YES;
+    [self submitCurrentText];
+    return NO;
 }
 
 #pragma mark - LocalWakeWordServiceDelegate

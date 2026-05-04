@@ -23,18 +23,28 @@
     AlarmIntentResult *result = [[AlarmIntentResult alloc] init];
 
     if (trimmedText.length == 0) {
-        result.assistantText = @"我在，请说出你想设置的闹钟。";
+        result.assistantText = @"我在，可以帮你设置提醒，也可以查询手表数据。";
         result.spokenText = result.assistantText;
         return result;
     }
 
-    BOOL isAlarmIntent = [trimmedText containsString:@"闹钟"] || self.pendingOriginalText.length > 0;
-    if (!isAlarmIntent) {
-        result.assistantText = @"我目前可以先帮你设置闹钟。";
-        result.spokenText = result.assistantText;
-        return result;
+    if (self.pendingOriginalText.length == 0 && [self isWatchDataQueryIntent:trimmedText]) {
+        return [self handleWatchDataQueryText:trimmedText];
     }
 
+    BOOL isReminderIntent = [self isReminderIntentText:trimmedText] || self.pendingOriginalText.length > 0;
+    if (isReminderIntent) {
+        return [self handleReminderText:trimmedText];
+    }
+
+    result.assistantText = @"我现在可以处理提醒设置和手表数据查询。你可以说“明天早上 8 点提醒我吃药”，也可以说“查一下现在心率”。";
+    result.spokenText = @"我现在可以处理提醒设置和手表数据查询。";
+    return result;
+}
+
+- (AlarmIntentResult *)handleReminderText:(NSString *)text {
+    NSString *trimmedText = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    AlarmIntentResult *result = [[AlarmIntentResult alloc] init];
     NSString *combinedText = self.pendingOriginalText.length > 0
         ? [NSString stringWithFormat:@"%@ %@", self.pendingOriginalText, trimmedText]
         : trimmedText;
@@ -42,40 +52,75 @@
     NSString *time = [self parseTimeFromText:combinedText];
     if (time.length == 0) {
         self.pendingOriginalText = combinedText;
-        result.assistantText = @"好的，请问闹钟设置在什么时间？";
+        result.assistantText = @"好的，请问提醒设置在什么时间？";
         result.spokenText = result.assistantText;
         return result;
     }
 
     NSString *date = [self parseDateFromText:combinedText];
-    NSString *repeat = [combinedText containsString:@"每天"] ? @"daily" : @"none";
+    NSString *repeat = [self parseRepeatFromText:combinedText];
+    NSString *category = [self reminderCategoryFromText:combinedText];
+    NSString *title = [self reminderTitleFromText:combinedText category:category];
     NSDictionary *payload = @{
-        @"intent": @"set_alarm",
+        @"intent": @"create_reminder",
         @"status": @"ready",
+        @"category": category,
         @"originalText": combinedText,
         @"slots": @{
             @"date": date,
             @"time": time,
             @"repeat": repeat,
-            @"label": [NSNull null]
+            @"title": title,
+            @"medicineName": [category isEqualToString:@"medication"] ? title : (id)[NSNull null],
+            @"dosage": [NSNull null]
         }
     };
 
-    NSError *jsonError = nil;
-    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:NSJSONWritingPrettyPrinted error:&jsonError];
-    if (!jsonData || jsonError) {
-        result.assistantText = @"闹钟信息已识别，但生成 JSON 时失败了。";
+    NSString *jsonString = [self jsonStringFromPayload:payload];
+    if (jsonString.length == 0) {
+        result.assistantText = @"提醒信息已识别，但生成 JSON 时失败了。";
         result.spokenText = result.assistantText;
         return result;
     }
 
-    NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
     self.pendingOriginalText = nil;
     result.ready = YES;
     result.jsonString = jsonString;
     result.assistantText = [NSString stringWithFormat:@"已解析为 JSON，后续可调用服务端接口：\n%@", jsonString];
-    result.spokenText = @"好的，闹钟信息已经解析完成，后续可以调用服务端接口。";
-    [self submitParsedAlarmJSON:jsonString];
+    result.spokenText = @"好的，提醒信息已经解析完成，后续可以调用服务端接口。";
+    [self submitParsedIntentJSON:jsonString];
+    return result;
+}
+
+- (AlarmIntentResult *)handleWatchDataQueryText:(NSString *)text {
+    AlarmIntentResult *result = [[AlarmIntentResult alloc] init];
+    NSString *metric = [self watchMetricFromText:text];
+    NSString *timeRange = [self timeRangeFromText:text];
+    NSDictionary *payload = @{
+        @"intent": @"query_device_data",
+        @"status": @"ready",
+        @"deviceType": @"watch",
+        @"originalText": text,
+        @"slots": @{
+            @"metric": metric,
+            @"timeRange": timeRange,
+            @"targetUser": @"current",
+            @"unit": [self unitForWatchMetric:metric]
+        }
+    };
+
+    NSString *jsonString = [self jsonStringFromPayload:payload];
+    if (jsonString.length == 0) {
+        result.assistantText = @"手表数据查询已识别，但生成 JSON 时失败了。";
+        result.spokenText = result.assistantText;
+        return result;
+    }
+
+    result.ready = YES;
+    result.jsonString = jsonString;
+    result.assistantText = [NSString stringWithFormat:@"已生成手表数据查询 JSON，后续可调用服务端接口：\n%@", jsonString];
+    result.spokenText = @"好的，我已经准备查询手表数据。";
+    [self submitParsedIntentJSON:jsonString];
     return result;
 }
 
@@ -150,6 +195,134 @@
     return [NSString stringWithFormat:@"%02ld:%02ld", (long)hour, (long)minute];
 }
 
+- (BOOL)isReminderIntentText:(NSString *)text {
+    return [self text:text containsAny:@[
+        @"闹钟", @"提醒", @"叫我", @"喊我", @"到点", @"记得",
+        @"吃药", @"服药", @"用药", @"药", @"喝水", @"起床", @"复诊"
+    ]];
+}
+
+- (BOOL)isWatchDataQueryIntent:(NSString *)text {
+    BOOL hasQueryWord = [self text:text containsAny:@[@"查", @"看", @"看看", @"查询", @"现在", @"今天", @"昨晚", @"最近", @"多少", @"怎么样", @"有没有"]];
+    BOOL hasWatchWord = [self text:text containsAny:@[@"手表", @"设备", @"老人", @"家人"]];
+    BOOL hasMetricWord = [self text:text containsAny:@[
+        @"心率", @"血氧", @"步数", @"睡眠", @"位置", @"定位", @"电量",
+        @"轨迹", @"跌倒", @"离线", @"异常", @"健康", @"运动", @"吃药", @"服药", @"用药"
+    ]];
+    return hasMetricWord && (hasQueryWord || hasWatchWord);
+}
+
+- (NSString *)reminderCategoryFromText:(NSString *)text {
+    if ([self text:text containsAny:@[@"吃药", @"服药", @"用药", @"药"]]) {
+        return @"medication";
+    }
+    if ([self text:text containsAny:@[@"闹钟", @"叫我", @"喊我", @"起床"]]) {
+        return @"alarm";
+    }
+    return @"general";
+}
+
+- (NSString *)reminderTitleFromText:(NSString *)text category:(NSString *)category {
+    if ([category isEqualToString:@"medication"]) {
+        if ([text containsString:@"降压药"]) {
+            return @"降压药";
+        }
+        if ([text containsString:@"降糖药"]) {
+            return @"降糖药";
+        }
+        return @"吃药";
+    }
+    if ([category isEqualToString:@"alarm"]) {
+        return [text containsString:@"起床"] ? @"起床" : @"闹钟";
+    }
+    if ([text containsString:@"喝水"]) {
+        return @"喝水";
+    }
+    if ([text containsString:@"复诊"]) {
+        return @"复诊";
+    }
+    return @"提醒";
+}
+
+- (NSString *)parseRepeatFromText:(NSString *)text {
+    if ([self text:text containsAny:@[@"每天", @"每日", @"天天"]]) {
+        return @"daily";
+    }
+    if ([self text:text containsAny:@[@"工作日", @"周一到周五", @"星期一到星期五"]]) {
+        return @"weekdays";
+    }
+    if ([self text:text containsAny:@[@"每周", @"每星期"]]) {
+        return @"weekly";
+    }
+    return @"none";
+}
+
+- (NSString *)watchMetricFromText:(NSString *)text {
+    if ([text containsString:@"心率"]) {
+        return @"heart_rate";
+    }
+    if ([text containsString:@"血氧"]) {
+        return @"blood_oxygen";
+    }
+    if ([self text:text containsAny:@[@"步数", @"运动"]]) {
+        return @"steps";
+    }
+    if ([text containsString:@"睡眠"]) {
+        return @"sleep";
+    }
+    if ([self text:text containsAny:@[@"位置", @"定位", @"轨迹"]]) {
+        return @"location";
+    }
+    if ([text containsString:@"电量"]) {
+        return @"battery";
+    }
+    if ([text containsString:@"跌倒"]) {
+        return @"fall_event";
+    }
+    if ([self text:text containsAny:@[@"吃药", @"服药", @"用药"]]) {
+        return @"medication_adherence";
+    }
+    if ([self text:text containsAny:@[@"离线", @"异常"]]) {
+        return @"device_event";
+    }
+    return @"health_summary";
+}
+
+- (NSString *)timeRangeFromText:(NSString *)text {
+    if ([self text:text containsAny:@[@"现在", @"当前", @"最新", @"多少"]]) {
+        return @"latest";
+    }
+    if ([text containsString:@"昨晚"]) {
+        return @"last_night";
+    }
+    if ([text containsString:@"昨天"]) {
+        return @"yesterday";
+    }
+    if ([text containsString:@"最近"]) {
+        return @"recent";
+    }
+    if ([text containsString:@"今天"]) {
+        return @"today";
+    }
+    return @"latest";
+}
+
+- (NSString *)unitForWatchMetric:(NSString *)metric {
+    NSDictionary<NSString *, NSString *> *units = @{
+        @"heart_rate": @"bpm",
+        @"blood_oxygen": @"%",
+        @"steps": @"steps",
+        @"battery": @"%",
+        @"location": @"geo",
+        @"sleep": @"duration",
+        @"fall_event": @"event",
+        @"device_event": @"event",
+        @"medication_adherence": @"record",
+        @"health_summary": @"summary"
+    };
+    return units[metric] ?: @"";
+}
+
 - (NSString *)normalizeChineseNumbersInText:(NSString *)text {
     NSMutableString *normalized = [text mutableCopy];
     NSDictionary<NSString *, NSString *> *numbers = @{
@@ -210,8 +383,17 @@
     return NO;
 }
 
-- (void)submitParsedAlarmJSON:(NSString *)jsonString {
-    NSLog(@"TODO submit alarm JSON to server: %@", jsonString);
+- (NSString *)jsonStringFromPayload:(NSDictionary *)payload {
+    NSError *jsonError = nil;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:NSJSONWritingPrettyPrinted error:&jsonError];
+    if (!jsonData || jsonError) {
+        return nil;
+    }
+    return [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+}
+
+- (void)submitParsedIntentJSON:(NSString *)jsonString {
+    NSLog(@"TODO submit intent JSON to server: %@", jsonString);
 }
 
 @end

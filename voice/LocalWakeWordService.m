@@ -213,7 +213,7 @@
         }
         self.lastTriggerTime = now;
         [self reset];
-        return @"本地开发唤醒 detector 检测到两段连续语音。接入正式 KWS 模型后这里会返回“小星小星”。";
+        return @"本地开发唤醒 detector 检测到两段连续语音。接入正式 KWS 模型后这里会返回“小星小星”或兼容词“小心小心”。";
     }
 
     return nil;
