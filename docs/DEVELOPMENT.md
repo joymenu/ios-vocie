@@ -4,7 +4,7 @@
 
 This app is an iOS voice/IM prototype for Xiao Xing. It supports:
 
-- Local wake word entry for "小星小星", with text compatibility for "小心小心".
+- Local wake word entry for "小星小星", with text compatibility for "小心小心" and common ASR near-sound variants.
 - IM chat with customer and Xiao Xing message bubbles.
 - Full-screen voice call flow after wake-up.
 - Speech recognition and speech synthesis.
@@ -42,11 +42,16 @@ Wake word logic is split into two layers:
 
 - `LocalWakeWordService`: manages microphone capture and delegates audio frames to a detector.
 - `WakeWordTextMatcher`: handles typed or ASR text wake word compatibility.
+- Development fallback: when the official iFlytek KWS integration is not ready, `ViewController` uses Apple speech recognition to listen for the wake word text so saying "小星小星" can still open the call screen during development.
 
 Supported text wake words:
 
 - `小星小星`
 - `小心小心`
+- `小新小新`
+- `小兴小兴`
+- `小型小型`
+- `小星星`
 
 `voice/keyword.txt` also includes both values for the future iFlytek wake word resource.
 
@@ -115,6 +120,7 @@ Current behavior:
 
 - Validates config and SDK presence.
 - Falls back to the development detector if SDK artifacts or credentials are missing.
+- Until the official strong-typed wake callback is wired, the app uses ASR-based development wake detection instead of the placeholder detector so it can actually wake on spoken "小星小星".
 
 Future work:
 
@@ -291,6 +297,7 @@ Response example:
 iOS implementation notes:
 
 - Keep `AlarmIntentParser` as the local development parser until the server API is ready.
+- Prefer high-confidence watch-data queries over pending reminder slot-filling. For example, after Xiao Xing asks for a reminder time, a new utterance like `查询一下最近查询一下心率` should switch to `query_device_data` and clear the pending reminder context.
 - Add `IntentAPIClient` as the only networking boundary for parsing and execution.
 - Add a feature flag, for example `useServerSideNLU`, so local rules can remain available during backend rollout.
 - Never store DeepSeek credentials, endpoint URLs with secrets, or model prompts in the iOS app bundle.
@@ -365,6 +372,7 @@ Reminder creation:
 Watch queries:
 
 - `查一下现在心率`
+- `查询一下最近查询一下心率`
 - `今天步数多少`
 - `昨晚睡眠怎么样`
 - `手表还有多少电`
@@ -376,6 +384,10 @@ Wake word:
 
 - `小星小星`
 - `小心小心`
+- `小新小新`
+- `小兴小兴`
+- `小型小型`
+- `小星星`
 - `小星小星 明天早上 8 点提醒我吃药`
 
 ## Build

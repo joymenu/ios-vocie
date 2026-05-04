@@ -28,7 +28,8 @@
         return result;
     }
 
-    if (self.pendingOriginalText.length == 0 && [self isWatchDataQueryIntent:trimmedText]) {
+    if ([self isWatchDataQueryIntent:trimmedText]) {
+        self.pendingOriginalText = nil;
         return [self handleWatchDataQueryText:trimmedText];
     }
 

@@ -43,7 +43,14 @@
 }
 
 + (NSArray<NSString *> *)wakeWordVariants {
-    return @[@"小星小星", @"小心小心"];
+    return @[
+        @"小星小星",
+        @"小心小心",
+        @"小新小新",
+        @"小兴小兴",
+        @"小型小型",
+        @"小星星"
+    ];
 }
 
 + (NSString *)normalizedTextForWakeWordMatching:(NSString *)text {
@@ -58,10 +65,13 @@
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         NSString *separatorPattern = @"[\\s\\p{Punct}，。！？、：；“”‘’（）【】《》…]*";
-        NSString *pattern = [NSString stringWithFormat:@"^小%@(?:星|心)%@小%@(?:星|心)%@",
+        NSString *nearSoundPattern = @"(?:星|心|新|兴|型)";
+        NSString *pattern = [NSString stringWithFormat:@"^小%@%@%@(?:小%@%@|星)%@",
+                             separatorPattern,
+                             nearSoundPattern,
                              separatorPattern,
                              separatorPattern,
-                             separatorPattern,
+                             nearSoundPattern,
                              separatorPattern];
         expression = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
     });
