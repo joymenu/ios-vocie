@@ -86,8 +86,8 @@
     self.pendingOriginalText = nil;
     result.ready = YES;
     result.jsonString = jsonString;
-    result.assistantText = [NSString stringWithFormat:@"已解析为 JSON，后续可调用服务端接口：\n%@", jsonString];
-    result.spokenText = @"好的，提醒信息已经解析完成，后续可以调用服务端接口。";
+    result.assistantText = [self mockAssistantTextForReminderPayload:payload];
+    result.spokenText = result.assistantText;
     [self submitParsedIntentJSON:jsonString];
     return result;
 }
@@ -118,8 +118,8 @@
 
     result.ready = YES;
     result.jsonString = jsonString;
-    result.assistantText = [NSString stringWithFormat:@"已生成手表数据查询 JSON，后续可调用服务端接口：\n%@", jsonString];
-    result.spokenText = @"好的，我已经准备查询手表数据。";
+    result.assistantText = [self mockAssistantTextForWatchPayload:payload];
+    result.spokenText = result.assistantText;
     [self submitParsedIntentJSON:jsonString];
     return result;
 }
@@ -204,7 +204,7 @@
 
 - (BOOL)isWatchDataQueryIntent:(NSString *)text {
     BOOL hasQueryWord = [self text:text containsAny:@[@"查", @"看", @"看看", @"查询", @"现在", @"今天", @"昨晚", @"最近", @"多少", @"怎么样", @"有没有"]];
-    BOOL hasWatchWord = [self text:text containsAny:@[@"手表", @"设备", @"老人", @"家人"]];
+    BOOL hasWatchWord = [self text:text containsAny:@[@"手表", @"设备", @"老人", @"家人", @"爸爸", @"妈妈", @"爸", @"妈", @"爷爷", @"奶奶", @"外公", @"外婆"]];
     BOOL hasMetricWord = [self text:text containsAny:@[
         @"心率", @"血氧", @"步数", @"睡眠", @"位置", @"定位", @"电量",
         @"轨迹", @"跌倒", @"离线", @"异常", @"健康", @"运动", @"吃药", @"服药", @"用药"
@@ -323,6 +323,132 @@
     return units[metric] ?: @"";
 }
 
+- (NSString *)mockAssistantTextForReminderPayload:(NSDictionary *)payload {
+    NSDictionary *slots = payload[@"slots"];
+    NSString *date = slots[@"date"];
+    NSString *time = slots[@"time"];
+    NSString *repeat = slots[@"repeat"];
+    NSString *title = slots[@"title"];
+    NSString *category = payload[@"category"];
+
+    NSString *dateText = [self displayTextForDateString:date];
+    NSString *repeatText = [self displayTextForRepeat:repeat];
+    NSString *titleText = title.length > 0 ? title : @"提醒";
+
+    if ([repeat isEqualToString:@"none"]) {
+        if ([category isEqualToString:@"medication"]) {
+            return [NSString stringWithFormat:@"好的，已为你设置%@ %@ 的%@提醒。到点我会提醒。", dateText, time, titleText];
+        }
+        return [NSString stringWithFormat:@"好的，已为你设置%@ %@ 的%@。", dateText, time, titleText];
+    }
+
+    return [NSString stringWithFormat:@"好的，已为你设置%@ %@ 的%@。", repeatText, time, titleText];
+}
+
+- (NSString *)mockAssistantTextForWatchPayload:(NSDictionary *)payload {
+    NSDictionary *slots = payload[@"slots"];
+    NSString *metric = slots[@"metric"];
+    NSString *timeRange = slots[@"timeRange"];
+    NSString *originalText = payload[@"originalText"];
+    NSString *subject = [self mockSubjectFromText:originalText];
+
+    if ([metric isEqualToString:@"heart_rate"]) {
+        return [NSString stringWithFormat:@"%@当前心率 78 次/分钟，处于正常范围，数据更新于 1 分钟前。", subject];
+    }
+    if ([metric isEqualToString:@"blood_oxygen"]) {
+        return [NSString stringWithFormat:@"%@当前血氧 97%%，状态正常，数据更新于 2 分钟前。", subject];
+    }
+    if ([metric isEqualToString:@"steps"]) {
+        return [NSString stringWithFormat:@"%@今天已走 6320 步，活动量不错。", subject];
+    }
+    if ([metric isEqualToString:@"sleep"]) {
+        if ([timeRange isEqualToString:@"last_night"] || [timeRange isEqualToString:@"today"]) {
+            return [NSString stringWithFormat:@"%@昨晚睡眠 7 小时 20 分钟，深睡 2 小时 05 分钟，整体睡眠质量良好。", subject];
+        }
+        return [NSString stringWithFormat:@"%@最近睡眠比较稳定，近 7 天平均睡眠 7 小时 10 分钟。", subject];
+    }
+    if ([metric isEqualToString:@"location"]) {
+        return [NSString stringWithFormat:@"%@现在在家附近，距离常用位置约 120 米，定位更新于刚刚。", subject];
+    }
+    if ([metric isEqualToString:@"battery"]) {
+        return [NSString stringWithFormat:@"%@手表当前电量 86%%，预计还能使用 1 天以上。", subject];
+    }
+    if ([metric isEqualToString:@"fall_event"]) {
+        return [NSString stringWithFormat:@"%@最近没有检测到跌倒异常。", subject];
+    }
+    if ([metric isEqualToString:@"device_event"]) {
+        return [NSString stringWithFormat:@"%@手表在线，今天没有离线或设备异常记录。", subject];
+    }
+    if ([metric isEqualToString:@"medication_adherence"]) {
+        return [NSString stringWithFormat:@"%@今天早上的吃药提醒已确认，晚上还有一次待提醒。", subject];
+    }
+
+    return [NSString stringWithFormat:@"%@今天健康情况整体平稳：心率 78 次/分钟，血氧 97%%，步数 6320，未发现跌倒或设备异常。", subject];
+}
+
+- (NSString *)mockSubjectFromText:(NSString *)text {
+    if ([text containsString:@"爸爸"] || [text containsString:@"爸"]) {
+        return @"爸爸";
+    }
+    if ([text containsString:@"妈妈"] || [text containsString:@"妈"]) {
+        return @"妈妈";
+    }
+    if ([text containsString:@"爷爷"]) {
+        return @"爷爷";
+    }
+    if ([text containsString:@"奶奶"]) {
+        return @"奶奶";
+    }
+    if ([text containsString:@"外公"]) {
+        return @"外公";
+    }
+    if ([text containsString:@"外婆"]) {
+        return @"外婆";
+    }
+    if ([text containsString:@"老人"]) {
+        return @"老人";
+    }
+    return @"";
+}
+
+- (NSString *)displayTextForDateString:(NSString *)dateString {
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.dateFormat = @"yyyy-MM-dd";
+    NSDate *date = [formatter dateFromString:dateString];
+    if (!date) {
+        return dateString ?: @"今天";
+    }
+
+    NSCalendar *calendar = [NSCalendar currentCalendar];
+    NSDate *today = [NSDate date];
+    NSDate *tomorrow = [calendar dateByAddingUnit:NSCalendarUnitDay value:1 toDate:today options:0];
+    NSDate *dayAfterTomorrow = [calendar dateByAddingUnit:NSCalendarUnitDay value:2 toDate:today options:0];
+    if ([calendar isDate:date inSameDayAsDate:today]) {
+        return @"今天";
+    }
+    if ([calendar isDate:date inSameDayAsDate:tomorrow]) {
+        return @"明天";
+    }
+    if ([calendar isDate:date inSameDayAsDate:dayAfterTomorrow]) {
+        return @"后天";
+    }
+    return dateString;
+}
+
+- (NSString *)displayTextForRepeat:(NSString *)repeat {
+    if ([repeat isEqualToString:@"daily"]) {
+        return @"每天";
+    }
+    if ([repeat isEqualToString:@"weekdays"]) {
+        return @"每个工作日";
+    }
+    if ([repeat isEqualToString:@"weekly"]) {
+        return @"每周";
+    }
+    return @"";
+}
+
 - (NSString *)normalizeChineseNumbersInText:(NSString *)text {
     NSMutableString *normalized = [text mutableCopy];
     NSDictionary<NSString *, NSString *> *numbers = @{
@@ -393,7 +519,7 @@
 }
 
 - (void)submitParsedIntentJSON:(NSString *)jsonString {
-    NSLog(@"TODO submit intent JSON to server: %@", jsonString);
+    NSLog(@"MOCK submit intent JSON to server: %@", jsonString);
 }
 
 @end

@@ -37,8 +37,8 @@ static NSString *const IFlytekAbilityId = @"e867a88f2";
     // 3. [AiHelper specifyDataSet:@"e867a88f2" key:@"key_word" ...]
     // 4. [AiHelper start:@"e867a88f2" param:... ctxContent:...]
     // 5. Stream PCM frames through [AiHelper write:handle:].
-    detector.statusMessage = @"讯飞 AIKit SDK 和配置已检测到，请接入官方 Demo 中的强类型调用完成唤醒结果回调。";
-    return detector;
+    detector.statusMessage = @"讯飞 AIKit SDK 和配置已检测到，但当前演示版仍使用开发唤醒 detector，避免占位实现无法触发唤醒。";
+    return nil;
 }
 
 + (NSString *)integrationStatusMessage {
@@ -49,7 +49,7 @@ static NSString *const IFlytekAbilityId = @"e867a88f2";
     if (![detector validateSDKPresence]) {
         return detector.statusMessage;
     }
-    return @"讯飞 AIKit 配置和 SDK 已检测到。";
+    return @"讯飞 AIKit 配置和 SDK 已检测到，但强类型唤醒回调尚未接入，当前演示版已使用开发唤醒 detector。";
 }
 
 - (nullable NSString *)processPCMInt16Samples:(const int16_t *)samples count:(NSUInteger)count sampleRate:(double)sampleRate {

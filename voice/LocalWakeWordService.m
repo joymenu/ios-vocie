@@ -163,6 +163,7 @@
 @interface DevelopmentWakeWordDetector ()
 
 @property (nonatomic, assign) NSUInteger loudFrameCount;
+@property (nonatomic, assign) NSUInteger speechFrameCount;
 @property (nonatomic, assign) NSUInteger quietFrameCountAfterFirstBurst;
 @property (nonatomic, assign) NSUInteger burstCount;
 @property (nonatomic, assign) NSTimeInterval lastTriggerTime;
@@ -183,11 +184,12 @@
     }
 
     double rms = sqrt(sumSquares / count);
-    BOOL isSpeechLike = rms > 0.032;
-    BOOL isQuiet = rms < 0.018;
+    BOOL isSpeechLike = rms > 0.018;
+    BOOL isQuiet = rms < 0.010;
 
     if (isSpeechLike) {
         self.loudFrameCount += 1;
+        self.speechFrameCount += 1;
         self.quietFrameCountAfterFirstBurst = 0;
         if (self.loudFrameCount >= 3) {
             self.burstCount += 1;
@@ -200,12 +202,12 @@
         }
     }
 
-    if (self.quietFrameCountAfterFirstBurst > 12) {
+    if (self.quietFrameCountAfterFirstBurst > 10) {
         [self reset];
         return nil;
     }
 
-    if (self.burstCount >= 2) {
+    if (self.burstCount >= 2 || self.speechFrameCount >= 4) {
         NSTimeInterval now = NSDate.date.timeIntervalSince1970;
         if (now - self.lastTriggerTime < 2.5) {
             [self reset];
@@ -213,7 +215,7 @@
         }
         self.lastTriggerTime = now;
         [self reset];
-        return @"本地开发唤醒 detector 检测到两段连续语音。接入正式 KWS 模型后这里会返回“小星小星”或兼容词“小心小心”。";
+        return @"本地开发唤醒 detector 检测到语音唤醒。接入正式 KWS 模型后这里会返回“小星小星”或兼容词“小心小心”。";
     }
 
     return nil;
@@ -221,6 +223,7 @@
 
 - (void)reset {
     self.loudFrameCount = 0;
+    self.speechFrameCount = 0;
     self.quietFrameCountAfterFirstBurst = 0;
     self.burstCount = 0;
 }
