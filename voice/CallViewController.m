@@ -15,7 +15,8 @@
 
 typedef NS_ENUM(NSInteger, CallMessageRole) {
     CallMessageRoleUser,
-    CallMessageRoleAssistant
+    CallMessageRoleAssistant,
+    CallMessageRoleSystem
 };
 
 static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。你可以说提醒事项，也可以问手表健康数据。";
@@ -36,6 +37,9 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
 @property (nonatomic, strong) NSLayoutConstraint *avatarTrailingConstraint;
 @property (nonatomic, strong) NSLayoutConstraint *bubbleLeadingToAvatarConstraint;
 @property (nonatomic, strong) NSLayoutConstraint *bubbleTrailingToAvatarConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleCenterXConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleSystemLeadingConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleSystemTrailingConstraint;
 
 @end
 
@@ -81,6 +85,9 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
     self.avatarTrailingConstraint = [self.avatarView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16];
     self.bubbleLeadingToAvatarConstraint = [self.bubbleView.leadingAnchor constraintEqualToAnchor:self.avatarView.trailingAnchor constant:8];
     self.bubbleTrailingToAvatarConstraint = [self.bubbleView.trailingAnchor constraintEqualToAnchor:self.avatarView.leadingAnchor constant:-8];
+    self.bubbleCenterXConstraint = [self.bubbleView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor];
+    self.bubbleSystemLeadingConstraint = [self.bubbleView.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.contentView.leadingAnchor constant:40];
+    self.bubbleSystemTrailingConstraint = [self.bubbleView.trailingAnchor constraintLessThanOrEqualToAnchor:self.contentView.trailingAnchor constant:-40];
 
     [NSLayoutConstraint activateConstraints:@[
         [self.avatarView.topAnchor constraintEqualToAnchor:self.bubbleView.topAnchor constant:1],
@@ -104,8 +111,35 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
 }
 
 - (void)configureWithText:(NSString *)text role:(CallMessageRole)role {
-    BOOL isUser = role == CallMessageRoleUser;
+    self.avatarView.hidden = (role == CallMessageRoleSystem);
     self.messageLabel.text = text;
+
+    [NSLayoutConstraint deactivateConstraints:@[
+        self.avatarLeadingConstraint,
+        self.avatarTrailingConstraint,
+        self.bubbleLeadingToAvatarConstraint,
+        self.bubbleTrailingToAvatarConstraint,
+        self.bubbleCenterXConstraint,
+        self.bubbleSystemLeadingConstraint,
+        self.bubbleSystemTrailingConstraint
+    ]];
+
+    if (role == CallMessageRoleSystem) {
+        self.messageLabel.textAlignment = NSTextAlignmentCenter;
+        self.messageLabel.textColor = [UIColor colorWithRed:0.38 green:0.45 blue:0.53 alpha:1.0];
+        self.bubbleView.backgroundColor = [UIColor colorWithRed:0.91 green:0.94 blue:0.97 alpha:1.0];
+        self.bubbleView.layer.borderColor = [UIColor colorWithRed:0.84 green:0.88 blue:0.92 alpha:1.0].CGColor;
+        [NSLayoutConstraint activateConstraints:@[
+            self.avatarLeadingConstraint,
+            self.bubbleCenterXConstraint,
+            self.bubbleSystemLeadingConstraint,
+            self.bubbleSystemTrailingConstraint
+        ]];
+        return;
+    }
+
+    BOOL isUser = role == CallMessageRoleUser;
+    self.messageLabel.textAlignment = NSTextAlignmentLeft;
     self.avatarLabel.text = isUser ? @"我" : @"星";
     self.avatarLabel.textColor = isUser ? UIColor.whiteColor : [UIColor colorWithRed:0.08 green:0.22 blue:0.38 alpha:1.0];
     self.avatarView.backgroundColor = isUser
@@ -119,12 +153,6 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
         : [UIColor colorWithRed:0.86 green:0.90 blue:0.94 alpha:1.0].CGColor;
     self.messageLabel.textColor = isUser ? UIColor.whiteColor : [UIColor colorWithRed:0.08 green:0.14 blue:0.20 alpha:1.0];
 
-    [NSLayoutConstraint deactivateConstraints:@[
-        self.avatarLeadingConstraint,
-        self.avatarTrailingConstraint,
-        self.bubbleLeadingToAvatarConstraint,
-        self.bubbleTrailingToAvatarConstraint
-    ]];
     [NSLayoutConstraint activateConstraints:isUser
         ? @[self.avatarTrailingConstraint, self.bubbleTrailingToAvatarConstraint]
         : @[self.avatarLeadingConstraint, self.bubbleLeadingToAvatarConstraint]];
@@ -142,6 +170,7 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UITextField *textField;
 @property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) UIActivityIndicatorView *intentRequestIndicator;
 @property (nonatomic, strong) NSLayoutConstraint *inputBarBottomConstraint;
 @property (nonatomic, copy) NSString *lastFinalSpeechText;
 @property (nonatomic, copy, nullable) NSString *pendingRecognizedText;
@@ -228,13 +257,24 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
     avatarView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:avatarView];
 
+    self.intentRequestIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    self.intentRequestIndicator.hidesWhenStopped = YES;
+    self.intentRequestIndicator.translatesAutoresizingMaskIntoConstraints = NO;
+
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.text = @"准备监听";
-    self.statusLabel.textAlignment = NSTextAlignmentCenter;
+    self.statusLabel.textAlignment = NSTextAlignmentNatural;
     self.statusLabel.font = [UIFont systemFontOfSize:13];
     self.statusLabel.textColor = [UIColor colorWithRed:0.34 green:0.42 blue:0.50 alpha:1.0];
+    self.statusLabel.numberOfLines = 0;
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.statusLabel];
+
+    UIStackView *statusRow = [[UIStackView alloc] initWithArrangedSubviews:@[self.intentRequestIndicator, self.statusLabel]];
+    statusRow.axis = UILayoutConstraintAxisHorizontal;
+    statusRow.alignment = UIStackViewAlignmentCenter;
+    statusRow.spacing = 8;
+    statusRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:statusRow];
 
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.dataSource = self;
@@ -292,11 +332,12 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
         [avatarView.widthAnchor constraintEqualToConstant:132],
         [avatarView.heightAnchor constraintEqualToConstant:132],
 
-        [self.statusLabel.topAnchor constraintEqualToAnchor:avatarView.bottomAnchor constant:10],
-        [self.statusLabel.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:20],
-        [self.statusLabel.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-20],
+        [statusRow.topAnchor constraintEqualToAnchor:avatarView.bottomAnchor constant:10],
+        [statusRow.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [statusRow.leadingAnchor constraintGreaterThanOrEqualToAnchor:safeArea.leadingAnchor constant:16],
+        [statusRow.trailingAnchor constraintLessThanOrEqualToAnchor:safeArea.trailingAnchor constant:-16],
 
-        [self.tableView.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:10],
+        [self.tableView.topAnchor constraintEqualToAnchor:statusRow.bottomAnchor constant:10],
         [self.tableView.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor],
         [self.tableView.bottomAnchor constraintEqualToAnchor:inputBar.topAnchor constant:-10],
@@ -406,14 +447,18 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
     }
 
     [self appendMessage:intentText role:CallMessageRoleUser];
-    self.statusLabel.text = @"正在理解你的需求";
     [self requestRemoteIntentForText:intentText];
 }
 
 - (void)requestRemoteIntentForText:(NSString *)intentText {
+    self.statusLabel.text = @"正在请求服务端理解你的需求，请稍候…";
+    [self.intentRequestIndicator startAnimating];
     __weak typeof(self) weakSelf = self;
     [self.intentAPIClient parseIntentWithText:intentText completion:^(IntentAPIResult *_Nullable apiResult, NSError *_Nullable error) {
         __strong typeof(weakSelf) self = weakSelf;
+        if (self) {
+            [self.intentRequestIndicator stopAnimating];
+        }
         if (!self || self.closing) {
             return;
         }
@@ -421,10 +466,16 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
         NSString *assistantText = apiResult.displayText;
         NSString *spokenText = apiResult.spokenText;
         if (assistantText.length == 0 || error) {
+            NSString *detail = [IntentAPIClient localizedSummaryForIntentAPIError:error];
+            const NSUInteger kMaxIntentFailureDetailLength = 200;
+            if (detail.length > kMaxIntentFailureDetailLength) {
+                detail = [[detail substringToIndex:kMaxIntentFailureDetailLength] stringByAppendingString:@"…"];
+            }
+            [self appendMessage:[NSString stringWithFormat:@"服务端请求失败：%@", detail] role:CallMessageRoleSystem];
             AlarmIntentResult *localResult = [self.intentParser handleUserText:intentText];
             assistantText = localResult.assistantText;
             spokenText = localResult.spokenText ?: localResult.assistantText;
-            self.statusLabel.text = @"服务端不可用，已使用本地理解";
+            self.statusLabel.text = @"服务端请求失败，已改用本地回复";
         } else {
             self.statusLabel.text = @"小星已回复";
         }
@@ -589,7 +640,6 @@ static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。�
         return;
     }
 
-    self.statusLabel.text = @"你说完了，小星正在处理";
     [self handleUserText:trimmedText];
 }
 

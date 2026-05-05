@@ -22,7 +22,7 @@ static NSString * const IntentAPISignSecret = @"fuyunhealth.com";
     NSString *trimmedText = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (trimmedText.length == 0) {
         if (completion) {
-            completion(nil, [self errorWithCode:-1 message:@"text is empty"]);
+            completion(nil, [self errorWithCode:-1 message:@"发送内容为空"]);
         }
         return;
     }
@@ -39,7 +39,7 @@ static NSString * const IntentAPISignSecret = @"fuyunhealth.com";
     NSURL *url = [self requestURLWithParameters:parameters];
     if (!url) {
         if (completion) {
-            completion(nil, [self errorWithCode:-2 message:@"invalid url"]);
+            completion(nil, [self errorWithCode:-2 message:@"请求地址无效"]);
         }
         return;
     }
@@ -58,33 +58,45 @@ static NSString * const IntentAPISignSecret = @"fuyunhealth.com";
 
         NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
         if (![httpResponse isKindOfClass:NSHTTPURLResponse.class] || httpResponse.statusCode < 200 || httpResponse.statusCode >= 300) {
-            [self completeOnMain:completion result:nil error:[self errorWithCode:httpResponse.statusCode message:@"bad http status"]];
+            NSInteger code = [httpResponse isKindOfClass:NSHTTPURLResponse.class] ? httpResponse.statusCode : -1;
+            NSString *msg = [NSString stringWithFormat:@"服务端 HTTP %ld", (long)code];
+            [self completeOnMain:completion result:nil error:[self errorWithCode:code message:msg]];
             return;
         }
 
         if (data.length == 0) {
-            [self completeOnMain:completion result:nil error:[self errorWithCode:-3 message:@"empty response"]];
+            [self completeOnMain:completion result:nil error:[self errorWithCode:-3 message:@"服务端返回空数据"]];
             return;
         }
 
         NSError *jsonError = nil;
         id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-        if (jsonError || ![json isKindOfClass:NSDictionary.class]) {
-            [self completeOnMain:completion result:nil error:jsonError ?: [self errorWithCode:-4 message:@"invalid response json"]];
+        if (jsonError) {
+            [self completeOnMain:completion result:nil error:jsonError];
+            return;
+        }
+        if (![json isKindOfClass:NSDictionary.class]) {
+            [self completeOnMain:completion result:nil error:[self errorWithCode:-4 message:@"服务端返回格式异常"]];
             return;
         }
 
         NSDictionary *responseObject = (NSDictionary *)json;
         if (![responseObject[@"success"] boolValue]) {
-            NSString *message = [responseObject[@"msg"] isKindOfClass:NSString.class] ? responseObject[@"msg"] : @"server failure";
-            [self completeOnMain:completion result:nil error:[self errorWithCode:[responseObject[@"code"] integerValue] message:message]];
+            NSString *message = [responseObject[@"msg"] isKindOfClass:NSString.class] ? responseObject[@"msg"] : @"服务端处理失败";
+            NSInteger apiCode = [responseObject[@"code"] integerValue];
+            if (apiCode != 0 && message.length > 0) {
+                message = [NSString stringWithFormat:@"%@（%ld）", message, (long)apiCode];
+            } else if (apiCode != 0) {
+                message = [NSString stringWithFormat:@"服务端处理失败（%ld）", (long)apiCode];
+            }
+            [self completeOnMain:completion result:nil error:[self errorWithCode:apiCode message:message]];
             return;
         }
 
         NSDictionary *content = [responseObject[@"content"] isKindOfClass:NSDictionary.class] ? responseObject[@"content"] : nil;
         IntentAPIResult *result = [self resultFromContent:content];
         if (!result) {
-            [self completeOnMain:completion result:nil error:[self errorWithCode:-5 message:@"invalid response content"]];
+            [self completeOnMain:completion result:nil error:[self errorWithCode:-5 message:@"服务端返回内容不完整"]];
             return;
         }
 
@@ -174,7 +186,18 @@ static NSString * const IntentAPISignSecret = @"fuyunhealth.com";
 - (NSError *)errorWithCode:(NSInteger)code message:(NSString *)message {
     return [NSError errorWithDomain:IntentAPIErrorDomain
                                code:code
-                           userInfo:@{NSLocalizedDescriptionKey: message ?: @"request failed"}];
+                           userInfo:@{NSLocalizedDescriptionKey: message ?: @"请求失败"}];
+}
+
++ (NSString *)localizedSummaryForIntentAPIError:(NSError *)error {
+    if (!error) {
+        return @"未返回可用回复内容";
+    }
+    NSString *desc = error.localizedDescription;
+    if (desc.length > 0) {
+        return desc;
+    }
+    return [NSString stringWithFormat:@"错误码 %ld", (long)error.code];
 }
 
 - (void)completeOnMain:(IntentAPICompletion)completion result:(IntentAPIResult *_Nullable)result error:(NSError *_Nullable)error {

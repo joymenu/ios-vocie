@@ -4,7 +4,7 @@
 
 This app is an iOS voice/IM prototype for Xiao Xing. It supports:
 
-- Local wake word entry for "小星小星", with text compatibility for "小心小心" and common ASR near-sound variants.
+- Local wake word entry for "小星小星"; internally we also accept "小心小心" in typed text and in spoken listening (ASR/near-sound tolerance). **Do not** advertise or document "小心小心" to customers—customer-facing copy stays on "小星小星" only.
 - IM chat with customer and Xiao Xing message bubbles.
 - Full-screen voice call flow after wake-up.
 - Speech recognition and speech synthesis.
@@ -44,16 +44,16 @@ Wake word logic is split into two layers:
 - `WakeWordTextMatcher`: handles typed or ASR text wake word compatibility.
 - Development fallback: when the official iFlytek KWS integration is not ready, `ViewController` uses Apple speech recognition to listen for the wake word text so saying "小星小星" can still open the call screen during development.
 
-Supported text wake words:
+Supported text wake words (development / robustness):
 
-- `小星小星`
-- `小心小心`
+- `小星小星` — primary; safe for customer-facing guidance.
+- `小心小心` — **internal only**: matched in IM typed input and in continuous listening paths for ASR mishearing tolerance; **must not** appear in customer-facing manuals, onboarding, or marketing.
 - `小新小新`
 - `小兴小兴`
 - `小型小型`
 - `小星星`
 
-`voice/keyword.txt` also includes both values for the future iFlytek wake word resource.
+`voice/keyword.txt` includes both 「小星小星」 and 「小心小心」 for the future iFlytek wake word resource; the latter remains internal QA tolerance—still no customer-facing disclosure.
 
 ## Key Classes
 
@@ -334,7 +334,7 @@ iOS implementation notes:
 
 Interaction notes:
 
-- The first IM session shows a Xiao Xing welcome card with supported reminder, watch-data, follow-up, wake-word, networking, and health-safety guidance.
+- The first IM session shows a Xiao Xing welcome card with supported reminder, watch-data, follow-up, wake-word, networking, and health-safety guidance. Customer-visible wake wording uses 「小星小星」 only; do not mention 「小心小心」 to users even though the app accepts it internally for typing and listening.
 - The call screen uses a shorter opening prompt so TTS can start quickly.
 
 ## Backend Integration Points
@@ -397,8 +397,8 @@ Watch queries:
 
 Wake word:
 
-- `小星小星`
-- `小心小心`
+- `小星小星` — primary for users.
+- `小心小心` — QA / regression only; internal compatibility (typed + listening); do **not** tell customers.
 - `小新小新`
 - `小兴小兴`
 - `小型小型`

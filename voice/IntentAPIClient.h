@@ -26,6 +26,9 @@ typedef void (^IntentAPICompletion)(IntentAPIResult *_Nullable result, NSError *
 
 - (void)parseIntentWithText:(NSString *)text completion:(IntentAPICompletion)completion;
 
+/// Short Chinese summary for UI when `parseIntentWithText` completes with `error` or unusable payload.
++ (NSString *)localizedSummaryForIntentAPIError:(NSError *_Nullable)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

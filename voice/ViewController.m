@@ -293,6 +293,7 @@ static NSString * const ChatMessageTypeWelcome = @"welcome";
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UITextField *textField;
 @property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) UIActivityIndicatorView *intentRequestIndicator;
 @property (nonatomic, strong) NSLayoutConstraint *inputBarBottomConstraint;
 @property (nonatomic, assign) BOOL isCallPresented;
 @property (nonatomic, assign) BOOL wakeAuthorized;
@@ -329,7 +330,6 @@ static NSString * const ChatMessageTypeWelcome = @"welcome";
     [self setupViews];
     [self registerKeyboardNotifications];
     [self appendWelcomeCardIfNeeded];
-    [self appendMessage:@"我会监听“小星小星”，文本识别也兼容“小心小心”。" role:ChatMessageRoleSystem];
     [self appendMessage:wakeStatusMessage role:ChatMessageRoleSystem];
     [self requestWakePermissionAndStartListening];
 }
@@ -363,12 +363,23 @@ static NSString * const ChatMessageTypeWelcome = @"welcome";
     titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:titleLabel];
 
+    self.intentRequestIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    self.intentRequestIndicator.hidesWhenStopped = YES;
+    self.intentRequestIndicator.translatesAutoresizingMaskIntoConstraints = NO;
+
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.text = @"准备请求语音权限";
     self.statusLabel.font = [UIFont systemFontOfSize:13];
     self.statusLabel.textColor = [UIColor colorWithRed:0.34 green:0.42 blue:0.50 alpha:1.0];
+    self.statusLabel.numberOfLines = 0;
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.statusLabel];
+
+    UIStackView *statusRow = [[UIStackView alloc] initWithArrangedSubviews:@[self.intentRequestIndicator, self.statusLabel]];
+    statusRow.axis = UILayoutConstraintAxisHorizontal;
+    statusRow.alignment = UIStackViewAlignmentCenter;
+    statusRow.spacing = 8;
+    statusRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:statusRow];
 
     UIButton *callButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [callButton setTitle:@"通话" forState:UIControlStateNormal];
@@ -433,11 +444,11 @@ static NSString * const ChatMessageTypeWelcome = @"welcome";
         [callButton.widthAnchor constraintEqualToConstant:64],
         [callButton.heightAnchor constraintEqualToConstant:36],
 
-        [self.statusLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:6],
-        [self.statusLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
-        [self.statusLabel.trailingAnchor constraintEqualToAnchor:callButton.trailingAnchor],
+        [statusRow.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:6],
+        [statusRow.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
+        [statusRow.trailingAnchor constraintEqualToAnchor:callButton.trailingAnchor],
 
-        [self.tableView.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:14],
+        [self.tableView.topAnchor constraintEqualToAnchor:statusRow.bottomAnchor constant:14],
         [self.tableView.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor],
         [self.tableView.bottomAnchor constraintEqualToAnchor:inputBar.topAnchor constant:-10],
@@ -572,10 +583,14 @@ static NSString * const ChatMessageTypeWelcome = @"welcome";
 }
 
 - (void)requestRemoteIntentForText:(NSString *)intentText {
-    self.statusLabel.text = @"正在请求小星理解你的需求";
+    self.statusLabel.text = @"正在请求服务端理解你的需求，请稍候…";
+    [self.intentRequestIndicator startAnimating];
     __weak typeof(self) weakSelf = self;
     [self.intentAPIClient parseIntentWithText:intentText completion:^(IntentAPIResult *_Nullable apiResult, NSError *_Nullable error) {
         __strong typeof(weakSelf) self = weakSelf;
+        if (self) {
+            [self.intentRequestIndicator stopAnimating];
+        }
         if (!self) {
             return;
         }
@@ -583,10 +598,16 @@ static NSString * const ChatMessageTypeWelcome = @"welcome";
         NSString *assistantText = apiResult.displayText;
         NSString *spokenText = apiResult.spokenText;
         if (assistantText.length == 0 || error) {
+            NSString *detail = [IntentAPIClient localizedSummaryForIntentAPIError:error];
+            const NSUInteger kMaxIntentFailureDetailLength = 200;
+            if (detail.length > kMaxIntentFailureDetailLength) {
+                detail = [[detail substringToIndex:kMaxIntentFailureDetailLength] stringByAppendingString:@"…"];
+            }
+            [self appendMessage:[NSString stringWithFormat:@"服务端请求失败：%@", detail] role:ChatMessageRoleSystem];
             AlarmIntentResult *localResult = [self.intentParser handleUserText:intentText];
             assistantText = localResult.assistantText;
             spokenText = localResult.spokenText ?: localResult.assistantText;
-            self.statusLabel.text = @"服务端不可用，已使用本地理解";
+            self.statusLabel.text = @"服务端请求失败，已改用本地回复";
         } else {
             self.statusLabel.text = @"小星已回复";
         }
