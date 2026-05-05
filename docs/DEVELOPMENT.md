@@ -238,10 +238,10 @@ Recommended next intent additions:
 
 The iOS app must not connect to DeepSeek directly. DeepSeek access should stay behind the backend so API keys, model routing, prompts, rate limits, and safety rules are controlled server-side.
 
-Recommended architecture:
+Implemented architecture:
 
 ```text
-iOS App -> Backend Intent API -> DeepSeek NLU -> Backend Execution Services -> iOS App
+iOS App -> Backend Xiao Xing Intent API -> Backend AI Service -> Backend Execution Services -> iOS App
 ```
 
 Suggested parsing flow:
@@ -253,87 +253,102 @@ Suggested parsing flow:
 5. Backend executes the intent or returns a clarification question.
 6. iOS only renders `displayText`, plays `spokenText`, and optionally handles structured UI hints.
 
-Suggested backend contract:
+Backend contract:
 
 ```http
-POST /api/intent/parse
-Content-Type: application/json
+POST /ai/xiaoxing/parseIntent
+Content-Type: application/x-www-form-urlencoded
 ```
 
-Request example:
+The endpoint is protected by the backend `SignFilter`, not by `OpenApiHttpClient`.
+The request must use query/form parameters because `SignFilter` reads `request.getParameterMap()`.
+
+Required parameters:
+
+- `text`
+- `channel`
+- `ts`
+- `sign`
+
+Optional parameters:
+
+- `locale`
+- `timezone`
+- `userId`
+- `personId`
+- `deviceSn`
+- `contextJson`
+
+Signature rule:
+
+1. Sort all request parameter keys ascending.
+2. Skip `sign`.
+3. Concatenate each `key + value`.
+4. Append backend `Constants.SIGN_SECRET`.
+5. Base64 encode the concatenated string.
+6. MD5 hex the Base64 bytes.
+
+Request example as form/query parameters:
 
 ```json
 {
-  "text": "小星小星 最近有没有跌倒异常",
+  "text": "最近有没有跌倒异常",
   "locale": "zh-CN",
   "timezone": "Asia/Shanghai",
   "channel": "voice",
-  "context": {
-    "targetUser": "current",
-    "deviceType": "watch"
-  }
+  "ts": "1777953600000",
+  "sign": "calculated-sign"
 }
 ```
 
-Response example:
+The server returns the existing unified `ResponseResult<T>` wrapper. Xiao Xing's parsed result is in `content`.
+
+Response content example:
 
 ```json
 {
   "success": true,
-  "source": "deepseek",
-  "intent": "query_device_data",
-  "status": "ready",
-  "displayText": "最近没有检测到跌倒异常。",
-  "spokenText": "最近没有检测到跌倒异常。",
-  "slots": {
-    "metric": "fall_event",
-    "timeRange": "recent",
-    "targetUser": "current",
-    "unit": null
+  "content": {
+    "source": "ai",
+    "intent": "query_device_data",
+    "status": "ready",
+    "displayText": "最近没有检测到跌倒异常。",
+    "spokenText": "最近没有检测到跌倒异常。",
+    "slots": {
+      "metric": "fall_event",
+      "timeRange": "recent",
+      "targetUser": "current",
+      "unit": null
+    }
   }
 }
 ```
 
 iOS implementation notes:
 
-- Keep `AlarmIntentParser` as the local development parser until the server API is ready.
+- Keep `AlarmIntentParser` as the local fallback when the server API fails or returns invalid content.
 - Prefer high-confidence watch-data queries over pending reminder slot-filling. For example, after Xiao Xing asks for a reminder time, a new utterance like `查询一下最近查询一下心率` should switch to `query_device_data` and clear the pending reminder context.
-- Add `IntentAPIClient` as the only networking boundary for parsing and execution.
-- Add a feature flag, for example `useServerSideNLU`, so local rules can remain available during backend rollout.
+- `IntentAPIClient` is the only networking boundary for parsing.
 - Never store DeepSeek credentials, endpoint URLs with secrets, or model prompts in the iOS app bundle.
 - Log only sanitized text and intent JSON; avoid logging private health details in plain debug output.
 
+Interaction notes:
+
+- The first IM session shows a Xiao Xing welcome card with supported reminder, watch-data, follow-up, wake-word, networking, and health-safety guidance.
+- The call screen uses a shorter opening prompt so TTS can start quickly.
+
 ## Backend Integration Points
 
-Today the parser logs JSON through `submitParsedIntentJSON`.
+`IntentAPIClient` now calls `/ai/xiaoxing/parseIntent` asynchronously. Local parsing remains the fallback path.
+The default test backend base URL is `https://uat.stg.fuyunhealth.com`.
 
-Recommended next step:
+Recommended execution routing after parsing:
 
-1. Add an API client, for example `IntentAPIClient`.
-2. Replace `submitParsedIntentJSON` with an async request to the backend intent API.
-3. Route by intent:
+1. Route by intent:
    - `create_reminder` -> reminder service.
    - `query_device_data` -> watch data service.
    - `create_monitor` -> monitoring rule service.
-4. Convert API responses into user-facing Xiao Xing messages.
-
-Suggested backend contract:
-
-```http
-POST /api/intent
-Content-Type: application/json
-```
-
-Response example:
-
-```json
-{
-  "success": true,
-  "displayText": "当前心率 78 次/分钟，处于正常范围。",
-  "spokenText": "当前心率七十八次每分钟，处于正常范围。",
-  "data": {}
-}
-```
+2. Convert backend execution results into `displayText` and `spokenText`.
 
 ## Smart Watch Data Architecture
 

@@ -10,6 +10,7 @@
 #import "AlarmIntentParser.h"
 #import "CallViewController.h"
 #import "IFlytekAIKitWakeWordDetector.h"
+#import "IntentAPIClient.h"
 #import "LocalWakeWordService.h"
 #import "SpeechRecognitionService.h"
 #import "SpeechSynthesisService.h"
@@ -21,9 +22,18 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     ChatMessageRoleSystem
 };
 
+static NSString * const XiaoXingWelcomeShownKey = @"XiaoXingWelcomeShownKey";
+static NSString * const ChatMessageTypeWelcome = @"welcome";
+
 @interface ChatMessageCell : UITableViewCell
 
 - (void)configureWithText:(NSString *)text role:(ChatMessageRole)role;
+
+@end
+
+@interface XiaoXingWelcomeCell : UITableViewCell
+
+- (void)configure;
 
 @end
 
@@ -197,9 +207,85 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 
 @end
 
+@implementation XiaoXingWelcomeCell {
+    UIView *_cardView;
+    UILabel *_titleLabel;
+    UILabel *_bodyLabel;
+}
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (self) {
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+        self.backgroundColor = UIColor.clearColor;
+        self.contentView.backgroundColor = UIColor.clearColor;
+        [self setupViews];
+    }
+    return self;
+}
+
+- (void)setupViews {
+    _cardView = [[UIView alloc] init];
+    _cardView.backgroundColor = UIColor.whiteColor;
+    _cardView.layer.cornerRadius = 8;
+    _cardView.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
+    _cardView.layer.borderColor = [UIColor colorWithRed:0.82 green:0.88 blue:0.94 alpha:1.0].CGColor;
+    _cardView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:_cardView];
+
+    UIImageView *iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"sparkles"]];
+    iconView.tintColor = [UIColor colorWithRed:0.10 green:0.45 blue:0.92 alpha:1.0];
+    iconView.contentMode = UIViewContentModeScaleAspectFit;
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
+    [_cardView addSubview:iconView];
+
+    _titleLabel = [[UILabel alloc] init];
+    _titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    _titleLabel.textColor = [UIColor colorWithRed:0.07 green:0.12 blue:0.18 alpha:1.0];
+    _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [_cardView addSubview:_titleLabel];
+
+    _bodyLabel = [[UILabel alloc] init];
+    _bodyLabel.numberOfLines = 0;
+    _bodyLabel.font = [UIFont systemFontOfSize:14];
+    _bodyLabel.textColor = [UIColor colorWithRed:0.24 green:0.31 blue:0.39 alpha:1.0];
+    _bodyLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    _bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [_cardView addSubview:_bodyLabel];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [_cardView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:8],
+        [_cardView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
+        [_cardView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
+        [_cardView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-8],
+
+        [iconView.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:16],
+        [iconView.topAnchor constraintEqualToAnchor:_cardView.topAnchor constant:16],
+        [iconView.widthAnchor constraintEqualToConstant:22],
+        [iconView.heightAnchor constraintEqualToConstant:22],
+
+        [_titleLabel.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:8],
+        [_titleLabel.trailingAnchor constraintEqualToAnchor:_cardView.trailingAnchor constant:-16],
+        [_titleLabel.centerYAnchor constraintEqualToAnchor:iconView.centerYAnchor],
+
+        [_bodyLabel.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:16],
+        [_bodyLabel.trailingAnchor constraintEqualToAnchor:_cardView.trailingAnchor constant:-16],
+        [_bodyLabel.topAnchor constraintEqualToAnchor:iconView.bottomAnchor constant:12],
+        [_bodyLabel.bottomAnchor constraintEqualToAnchor:_cardView.bottomAnchor constant:-16]
+    ]];
+}
+
+- (void)configure {
+    _titleLabel.text = @"你好，我是小星";
+    _bodyLabel.text = @"我可以帮你设置吃药、闹钟和日程提醒，也可以查询心率、血氧、步数、睡眠、位置、电量、跌倒异常等手表信息，并继续追问。\n\n你可以这样说：\n明天早上8点提醒我吃药\n查一下现在心率\n最近有没有跌倒异常\n\nAI 理解可能需要联网；健康解释仅供参考，异常或紧急情况请优先联系医生或急救。你也可以说“小星小星”进入语音通话。";
+}
+
+@end
+
 @interface ViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, LocalWakeWordServiceDelegate, SpeechRecognitionServiceDelegate, CallViewControllerDelegate>
 
 @property (nonatomic, strong) AlarmIntentParser *intentParser;
+@property (nonatomic, strong) IntentAPIClient *intentAPIClient;
 @property (nonatomic, strong, nullable) LocalWakeWordService *wakeWordService;
 @property (nonatomic, strong, nullable) SpeechRecognitionService *wakeSpeechService;
 @property (nonatomic, strong) SpeechSynthesisService *speechSynthesisService;
@@ -221,6 +307,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.intentParser = [[AlarmIntentParser alloc] init];
+    self.intentAPIClient = [[IntentAPIClient alloc] init];
     id<LocalWakeWordDetecting> wakeDetector = [IFlytekAIKitWakeWordDetector detectorIfReady];
     NSString *wakeStatusMessage = nil;
     if (wakeDetector) {
@@ -241,7 +328,8 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 
     [self setupViews];
     [self registerKeyboardNotifications];
-    [self appendMessage:@"打开 App 后我会监听“小星小星”，文本识别也兼容“小心小心”。未接入正式讯飞 KWS 时，会临时使用系统语音识别做开发唤醒兜底。" role:ChatMessageRoleSystem];
+    [self appendWelcomeCardIfNeeded];
+    [self appendMessage:@"我会监听“小星小星”，文本识别也兼容“小心小心”。" role:ChatMessageRoleSystem];
     [self appendMessage:wakeStatusMessage role:ChatMessageRoleSystem];
     [self requestWakePermissionAndStartListening];
 }
@@ -303,6 +391,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     self.tableView.contentInset = UIEdgeInsetsMake(6, 0, 10, 0);
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.tableView registerClass:ChatMessageCell.class forCellReuseIdentifier:@"ChatMessageCell"];
+    [self.tableView registerClass:XiaoXingWelcomeCell.class forCellReuseIdentifier:@"XiaoXingWelcomeCell"];
     [self.view addSubview:self.tableView];
 
     UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
@@ -320,7 +409,7 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     [self.view addSubview:inputBar];
 
     self.textField = [[UITextField alloc] init];
-    self.textField.placeholder = @"例如：明天早8点提醒吃药 / 查一下现在心率";
+    self.textField.placeholder = @"问小星：提醒吃药、查心率、看睡眠...";
     self.textField.font = [UIFont systemFontOfSize:16];
     self.textField.returnKeyType = UIReturnKeySend;
     self.textField.delegate = self;
@@ -446,6 +535,14 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     [self submitCurrentText];
 }
 
+- (void)appendWelcomeCardIfNeeded {
+    if ([NSUserDefaults.standardUserDefaults boolForKey:XiaoXingWelcomeShownKey]) {
+        return;
+    }
+    [self.messages addObject:@{@"type": ChatMessageTypeWelcome}];
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:XiaoXingWelcomeShownKey];
+}
+
 - (void)submitCurrentText {
     [self handleUserText:self.textField.text];
     self.textField.text = @"";
@@ -471,9 +568,32 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
     }
 
     [self appendMessage:intentText role:ChatMessageRoleUser];
-    AlarmIntentResult *result = [self.intentParser handleUserText:intentText];
-    [self appendMessage:result.assistantText role:ChatMessageRoleAssistant];
-    [self speakAssistantText:result.spokenText ?: result.assistantText];
+    [self requestRemoteIntentForText:intentText];
+}
+
+- (void)requestRemoteIntentForText:(NSString *)intentText {
+    self.statusLabel.text = @"正在请求小星理解你的需求";
+    __weak typeof(self) weakSelf = self;
+    [self.intentAPIClient parseIntentWithText:intentText completion:^(IntentAPIResult *_Nullable apiResult, NSError *_Nullable error) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) {
+            return;
+        }
+
+        NSString *assistantText = apiResult.displayText;
+        NSString *spokenText = apiResult.spokenText;
+        if (assistantText.length == 0 || error) {
+            AlarmIntentResult *localResult = [self.intentParser handleUserText:intentText];
+            assistantText = localResult.assistantText;
+            spokenText = localResult.spokenText ?: localResult.assistantText;
+            self.statusLabel.text = @"服务端不可用，已使用本地理解";
+        } else {
+            self.statusLabel.text = @"小星已回复";
+        }
+
+        [self appendMessage:assistantText role:ChatMessageRoleAssistant];
+        [self speakAssistantText:spokenText ?: assistantText];
+    }];
 }
 
 - (void)appendMessage:(NSString *)text role:(ChatMessageRole)role {
@@ -528,10 +648,15 @@ typedef NS_ENUM(NSInteger, ChatMessageRole) {
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary<NSString *, id> *message = self.messages[indexPath.row];
+    if ([message[@"type"] isEqualToString:ChatMessageTypeWelcome]) {
+        XiaoXingWelcomeCell *cell = [tableView dequeueReusableCellWithIdentifier:@"XiaoXingWelcomeCell" forIndexPath:indexPath];
+        [cell configure];
+        return cell;
+    }
+
     static NSString *reuseIdentifier = @"ChatMessageCell";
     ChatMessageCell *cell = [tableView dequeueReusableCellWithIdentifier:reuseIdentifier forIndexPath:indexPath];
-
-    NSDictionary<NSString *, id> *message = self.messages[indexPath.row];
     ChatMessageRole role = [message[@"role"] integerValue];
     [cell configureWithText:message[@"text"] role:role];
     return cell;

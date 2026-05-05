@@ -8,6 +8,7 @@
 #import "CallViewController.h"
 
 #import "AlarmIntentParser.h"
+#import "IntentAPIClient.h"
 #import "SpeechRecognitionService.h"
 #import "SpeechSynthesisService.h"
 #import "WakeWordTextMatcher.h"
@@ -16,6 +17,8 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     CallMessageRoleUser,
     CallMessageRoleAssistant
 };
+
+static NSString * const XiaoXingCallOpeningPrompt = @"你好，我是小星。你可以说提醒事项，也可以问手表健康数据。";
 
 @interface CallMessageCell : UITableViewCell
 
@@ -132,6 +135,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 @interface CallViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, SpeechRecognitionServiceDelegate>
 
 @property (nonatomic, strong) AlarmIntentParser *intentParser;
+@property (nonatomic, strong) IntentAPIClient *intentAPIClient;
 @property (nonatomic, strong) SpeechRecognitionService *speechService;
 @property (nonatomic, strong) SpeechSynthesisService *speechSynthesisService;
 @property (nonatomic, strong) NSMutableArray<NSDictionary<NSString *, id> *> *messages;
@@ -154,6 +158,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     self = [super initWithNibName:nil bundle:nil];
     if (self) {
         _intentParser = intentParser;
+        _intentAPIClient = [[IntentAPIClient alloc] init];
         _speechService = [[SpeechRecognitionService alloc] init];
         _speechSynthesisService = [[SpeechSynthesisService alloc] init];
         _messages = [NSMutableArray array];
@@ -167,8 +172,8 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     self.view.backgroundColor = [UIColor colorWithRed:0.95 green:0.98 blue:1.0 alpha:1.0];
     self.speechService.delegate = self;
     [self setupViews];
-    [self appendMessage:@"你好，我是小星。你可以直接说要设置的提醒，也可以查询手表数据。" role:CallMessageRoleAssistant];
-    [self.delegate callViewController:self didAppendAssistantText:@"你好，我是小星。你可以直接说要设置的提醒，也可以查询手表数据。"];
+    [self appendMessage:XiaoXingCallOpeningPrompt role:CallMessageRoleAssistant];
+    [self.delegate callViewController:self didAppendAssistantText:XiaoXingCallOpeningPrompt];
     [self registerKeyboardNotifications];
 }
 
@@ -259,7 +264,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     [self.view addSubview:inputBar];
 
     self.textField = [[UITextField alloc] init];
-    self.textField.placeholder = @"输入提醒需求或手表数据查询";
+    self.textField.placeholder = @"问小星：提醒吃药、查心率、看睡眠...";
     self.textField.font = [UIFont systemFontOfSize:16];
     self.textField.returnKeyType = UIReturnKeySend;
     self.textField.delegate = self;
@@ -402,10 +407,32 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
 
     [self appendMessage:intentText role:CallMessageRoleUser];
     self.statusLabel.text = @"正在理解你的需求";
-    AlarmIntentResult *result = [self.intentParser handleUserText:intentText];
-    [self appendMessage:result.assistantText role:CallMessageRoleAssistant];
-    [self.delegate callViewController:self didReceiveUserText:intentText assistantText:result.assistantText];
-    [self speakAssistantText:result.spokenText ?: result.assistantText resumeListeningWhenDone:YES];
+    [self requestRemoteIntentForText:intentText];
+}
+
+- (void)requestRemoteIntentForText:(NSString *)intentText {
+    __weak typeof(self) weakSelf = self;
+    [self.intentAPIClient parseIntentWithText:intentText completion:^(IntentAPIResult *_Nullable apiResult, NSError *_Nullable error) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self || self.closing) {
+            return;
+        }
+
+        NSString *assistantText = apiResult.displayText;
+        NSString *spokenText = apiResult.spokenText;
+        if (assistantText.length == 0 || error) {
+            AlarmIntentResult *localResult = [self.intentParser handleUserText:intentText];
+            assistantText = localResult.assistantText;
+            spokenText = localResult.spokenText ?: localResult.assistantText;
+            self.statusLabel.text = @"服务端不可用，已使用本地理解";
+        } else {
+            self.statusLabel.text = @"小星已回复";
+        }
+
+        [self appendMessage:assistantText role:CallMessageRoleAssistant];
+        [self.delegate callViewController:self didReceiveUserText:intentText assistantText:assistantText];
+        [self speakAssistantText:spokenText ?: assistantText resumeListeningWhenDone:YES];
+    }];
 }
 
 - (void)appendMessage:(NSString *)text role:(CallMessageRole)role {
@@ -438,7 +465,7 @@ typedef NS_ENUM(NSInteger, CallMessageRole) {
     }
 
     self.hasPlayedOpeningPrompt = YES;
-    [self speakAssistantText:@"你好，我是小星。你可以直接说要设置的提醒，也可以查询手表数据。" resumeListeningWhenDone:YES];
+    [self speakAssistantText:XiaoXingCallOpeningPrompt resumeListeningWhenDone:YES];
 }
 
 - (void)beginListeningIfPossible {
